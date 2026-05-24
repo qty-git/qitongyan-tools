@@ -157,6 +157,8 @@ function AppContent() {
   // LLM Configuration
   const [llmProvider, setLlmProvider] = useState<LLMProvider>(() => (localStorage.getItem('llm_provider') as LLMProvider) || 'auto');
   const [geminiKey, setGeminiKey] = useState(() => localStorage.getItem('gemini_key') || import.meta.env.VITE_GEMINI_API_KEY || '');
+  const [openaiKey, setOpenaiKey] = useState(() => localStorage.getItem('openai_key') || '');
+  const [openaiModel, setOpenaiModel] = useState(() => localStorage.getItem('openai_model') || 'gpt-4.1-mini');
   const [qwenKey, setQwenKey] = useState(() => localStorage.getItem('qwen_key') || import.meta.env.VITE_QWEN_API_KEY || '');
   const [doubaoKey, setDoubaoKey] = useState(() => localStorage.getItem('doubao_key') || import.meta.env.VITE_DOUBAO_API_KEY || '');
   const [doubaoEndpoint, setDoubaoEndpoint] = useState(() => localStorage.getItem('doubao_endpoint') || import.meta.env.VITE_DOUBAO_ENDPOINT || '');
@@ -167,6 +169,7 @@ function AppContent() {
   const [showSettings, setShowSettings] = useState(false);
   
   const [showGeminiKey, setShowGeminiKey] = useState(false);
+  const [showOpenaiKey, setShowOpenaiKey] = useState(false);
   const [showDoubaoKey, setShowDoubaoKey] = useState(false);
   const [showQwenKey, setShowQwenKey] = useState(false);
   const [customPrompts, setCustomPrompts] = useState(() => {
@@ -210,6 +213,12 @@ function AppContent() {
   useEffect(() => {
     localStorage.setItem('gemini_key', geminiKey);
   }, [geminiKey]);
+  useEffect(() => {
+    localStorage.setItem('openai_key', openaiKey);
+  }, [openaiKey]);
+  useEffect(() => {
+    localStorage.setItem('openai_model', openaiModel);
+  }, [openaiModel]);
   useEffect(() => {
     localStorage.setItem('qwen_key', qwenKey);
   }, [qwenKey]);
@@ -460,6 +469,8 @@ function AppContent() {
       baseURL: llmProvider === 'doubao' ? doubaoEndpoint : (llmProvider === 'qwen' ? 'https://dashscope.aliyuncs.com/compatible-mode/v1' : undefined),
       model: llmProvider === 'doubao' ? doubaoVisionModel : (llmProvider === 'qwen' ? 'qwen-vl-max' : (llmProvider === 'openai' ? 'openai-serverless' : 'models/gemini-2.5-flash')),
       geminiKey: geminiKey,
+      openaiKey: openaiKey,
+      openaiModel: openaiModel,
       doubaoKey: doubaoKey,
       doubaoEndpoint: doubaoEndpoint,
       qwenKey: qwenKey,
@@ -673,6 +684,8 @@ function AppContent() {
         baseURL: llmProvider === 'doubao' ? doubaoEndpoint : (llmProvider === 'qwen' ? 'https://dashscope.aliyuncs.com/compatible-mode/v1' : undefined),
         model: llmProvider === 'doubao' ? doubaoVisionModel : (llmProvider === 'qwen' ? 'qwen-vl-max' : (llmProvider === 'openai' ? 'openai-serverless' : 'models/gemini-2.5-flash')),
         geminiKey: geminiKey,
+        openaiKey: openaiKey,
+        openaiModel: openaiModel,
         doubaoKey: doubaoKey,
         doubaoEndpoint: doubaoEndpoint,
         qwenKey: qwenKey,
@@ -1024,6 +1037,12 @@ function AppContent() {
         setGeminiKey={setGeminiKey}
         showGeminiKey={showGeminiKey}
         setShowGeminiKey={setShowGeminiKey}
+        openaiKey={openaiKey}
+        setOpenaiKey={setOpenaiKey}
+        openaiModel={openaiModel}
+        setOpenaiModel={setOpenaiModel}
+        showOpenaiKey={showOpenaiKey}
+        setShowOpenaiKey={setShowOpenaiKey}
         doubaoKey={doubaoKey}
         setDoubaoKey={setDoubaoKey}
         showDoubaoKey={showDoubaoKey}

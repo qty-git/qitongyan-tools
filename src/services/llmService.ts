@@ -6,6 +6,8 @@ export type LLMProvider = 'gemini' | 'openai' | 'qwen' | 'doubao' | 'auto';
 
 export interface LLMConfig {
   geminiKey?: string;
+  openaiKey?: string;
+  openaiModel?: string;
   doubaoKey?: string;
   doubaoVisionModel?: string;
   doubaoTextModel?: string;
@@ -292,12 +294,17 @@ async function callOpenAIVision(imageBase64: string, prompt: string, config: { a
   };
 }
 
-async function callOpenAIServerless(imageBase64: string | null, prompt: string): Promise<ExtractionResult> {
+async function callOpenAIServerless(imageBase64: string | null, prompt: string, config: LLMConfig): Promise<ExtractionResult> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (config.openaiKey) {
+    headers.Authorization = `Bearer ${config.openaiKey}`;
+  }
+
   const response = await withRetry(async () => {
     const res = await fetch('/.netlify/functions/openai', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'vision', imageBase64, prompt })
+      headers,
+      body: JSON.stringify({ action: 'vision', imageBase64, prompt, model: config.openaiModel || 'gpt-4.1-mini' })
     });
 
     const data = await res.json().catch(() => ({}));
@@ -386,7 +393,7 @@ export async function extractAttributesOnly(
   if (config.provider === 'openai' || config.provider === 'auto') {
     config.onModelChange?.('OpenAI');
     try {
-      const result = await callOpenAIServerless(imageBase64, getPrompt('openai'));
+      const result = await callOpenAIServerless(imageBase64, getPrompt('openai'), config);
       return result.attributes || {};
     } catch (e) {
       console.warn("OpenAI attributes extraction failed...", e);
@@ -538,7 +545,7 @@ export async function generateTitlesOnly(
   if (config.provider === 'openai' || config.provider === 'auto') {
     config.onModelChange?.('OpenAI');
     try {
-      const result = await callOpenAIServerless(imageBase64, getPrompt('openai'));
+      const result = await callOpenAIServerless(imageBase64, getPrompt('openai'), config);
       return { title: result.title || "", subtitle: result.subtitle || "" };
     } catch (e) {
       console.warn("OpenAI title generation failed...", e);
@@ -668,7 +675,7 @@ export async function generateProductNamesOnly(
   if (config.provider === 'openai' || config.provider === 'auto') {
     config.onModelChange?.('OpenAI');
     try {
-      const result = await callOpenAIServerless(imageBase64, prompt);
+      const result = await callOpenAIServerless(imageBase64, prompt, config);
       return result.productNames;
     } catch (e) {
       console.warn("OpenAI name generation failed, falling back...", e);
@@ -831,7 +838,7 @@ export async function generateEverything(
   if (config.provider === 'openai' || config.provider === 'auto') {
     config.onModelChange?.('OpenAI');
     try {
-      const result = await callOpenAIServerless(imageBase64, getPrompt('openai'));
+      const result = await callOpenAIServerless(imageBase64, getPrompt('openai'), config);
       return {
         title: result.title || "",
         subtitle: result.subtitle || "",
@@ -938,10 +945,14 @@ export async function testModelConnection(provider: LLMProvider, config: LLMConf
       });
       return !!response.text;
     } else if (provider === 'openai') {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (config.openaiKey) {
+        headers.Authorization = `Bearer ${config.openaiKey}`;
+      }
       const res = await fetch('/.netlify/functions/openai', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'test' })
+        headers,
+        body: JSON.stringify({ action: 'test', model: config.openaiModel || 'gpt-4.1-mini' })
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || `OpenAI 后端测试失败 (${res.status})`);

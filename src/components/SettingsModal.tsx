@@ -13,6 +13,12 @@ interface SettingsModalProps {
   setGeminiKey: (key: string) => void;
   showGeminiKey: boolean;
   setShowGeminiKey: (show: boolean) => void;
+  openaiKey: string;
+  setOpenaiKey: (key: string) => void;
+  openaiModel: string;
+  setOpenaiModel: (model: string) => void;
+  showOpenaiKey: boolean;
+  setShowOpenaiKey: (show: boolean) => void;
   doubaoKey: string;
   setDoubaoKey: (key: string) => void;
   showDoubaoKey: boolean;
@@ -40,6 +46,12 @@ export function SettingsModal({
   setGeminiKey,
   showGeminiKey,
   setShowGeminiKey,
+  openaiKey,
+  setOpenaiKey,
+  openaiModel,
+  setOpenaiModel,
+  showOpenaiKey,
+  setShowOpenaiKey,
   doubaoKey,
   setDoubaoKey,
   showDoubaoKey,
@@ -90,9 +102,11 @@ export function SettingsModal({
         doubaoTextModel,
         doubaoEndpoint,
         qwenKey,
+        openaiKey,
+        openaiModel,
         provider,
         apiKey: provider === 'gemini' ? geminiKey : (provider === 'doubao' ? doubaoKey : (provider === 'qwen' ? qwenKey : '')),
-        model: '' // Not needed for simple test
+        model: openaiModel
       };
       await testModelConnection(provider, config as any);
       setTestStatus(prev => ({ ...prev, [provider]: 'success' }));
@@ -250,7 +264,7 @@ export function SettingsModal({
                           <h3 className="text-sm font-bold text-blue-900">智能轮询模式已开启</h3>
                           <p className="text-[10px] text-blue-700 mt-1 leading-relaxed">
                             系统将按顺序尝试调用模型：<span className="font-bold underline">Gemini ➔ OpenAI 后端 ➔ 豆包 ➔ 通义千问</span>。<br />
-                            OpenAI Key 从 Netlify 环境变量读取，不会暴露在浏览器中。
+                            OpenAI 可使用系统设置中的个人 Key，也可继续使用 Netlify 环境变量。
                           </p>
                         </div>
                       </div>
@@ -325,36 +339,79 @@ export function SettingsModal({
                         <label className="text-sm font-bold text-gray-700 flex items-center gap-2">
                           ☁️ OpenAI 后端 {llmProvider === 'auto' && '(备选 1)'}
                         </label>
-                        <button
-                          onClick={() => handleTest('openai')}
-                          disabled={testStatus['openai'] === 'loading'}
-                          className={cn(
-                            "flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold transition-all",
-                            testStatus['openai'] === 'success' ? "bg-green-100 text-green-700" :
-                            testStatus['openai'] === 'error' ? "bg-red-100 text-red-700" :
-                            "bg-white border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-50"
-                          )}
-                        >
-                          {testStatus['openai'] === 'loading' ? <Loader2 size={10} className="animate-spin" /> : 
-                           testStatus['openai'] === 'success' ? <CheckCircle2 size={10} /> :
-                           testStatus['openai'] === 'error' ? <AlertCircle size={10} /> : <Play size={10} />}
-                          {testStatus['openai'] === 'loading' ? '测试中...' : 
-                           testStatus['openai'] === 'success' ? '连接成功' :
-                           testStatus['openai'] === 'error' ? '连接失败' : '测试连接'}
-                        </button>
+                        <div className="flex items-center gap-2">
+                          {openaiKey && <span className="text-[10px] text-green-600 font-bold">已配置</span>}
+                          <button
+                            onClick={() => handleTest('openai')}
+                            disabled={testStatus['openai'] === 'loading'}
+                            className={cn(
+                              "flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold transition-all",
+                              testStatus['openai'] === 'success' ? "bg-green-100 text-green-700" :
+                              testStatus['openai'] === 'error' ? "bg-red-100 text-red-700" :
+                              "bg-white border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+                            )}
+                          >
+                            {testStatus['openai'] === 'loading' ? <Loader2 size={10} className="animate-spin" /> : 
+                             testStatus['openai'] === 'success' ? <CheckCircle2 size={10} /> :
+                             testStatus['openai'] === 'error' ? <AlertCircle size={10} /> : <Play size={10} />}
+                            {testStatus['openai'] === 'loading' ? '测试中...' : 
+                             testStatus['openai'] === 'success' ? '连接成功' :
+                             testStatus['openai'] === 'error' ? '连接失败' : '测试连接'}
+                          </button>
+                        </div>
                       </div>
                       {testStatus['openai'] === 'error' && (
                         <p className="text-[10px] text-red-500 bg-red-50 p-2 rounded-lg border border-red-100">
                           {testError['openai']}
                         </p>
                       )}
-                      <div className="p-3 bg-white border border-gray-200 rounded-xl">
-                        <p className="text-[10px] text-gray-500 leading-relaxed">
-                          请在 Netlify Site settings → Environment variables 中配置 <span className="font-bold text-gray-700">OPENAI_API_KEY</span>。前端不会保存或展示 OpenAI Key。
+                      <div className="relative">
+                        <Key className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
+                        <input 
+                          type={showOpenaiKey ? "text" : "password"}
+                          value={openaiKey}
+                          onChange={(e) => setOpenaiKey(e.target.value)}
+                          placeholder="输入 OpenAI API Key..."
+                          className="w-full pl-10 pr-10 py-3 bg-white border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowOpenaiKey(!showOpenaiKey)}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                        >
+                          {showOpenaiKey ? <EyeOff size={16} /> : <Eye size={16} />}
+                        </button>
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-bold text-gray-400 uppercase">模型</label>
+                        <input 
+                          type="text"
+                          value={openaiModel}
+                          onChange={(e) => setOpenaiModel(e.target.value)}
+                          placeholder="gpt-4.1-mini"
+                          className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-xs"
+                        />
+                      </div>
+                      <button
+                        onClick={() => {
+                          setTestStatus(prev => ({ ...prev, openaiSave: 'success' }));
+                          setTimeout(() => setTestStatus(prev => ({ ...prev, openaiSave: 'idle' })), 2000);
+                        }}
+                        className={cn(
+                          "w-full flex items-center justify-center gap-2 py-2 rounded-xl text-xs font-bold transition-all",
+                          testStatus['openaiSave'] === 'success' ? "bg-green-100 text-green-700" : "bg-blue-600 text-white hover:bg-blue-700"
+                        )}
+                      >
+                        {testStatus['openaiSave'] === 'success' ? <CheckCircle2 size={14} /> : <Key size={14} />}
+                        {testStatus['openaiSave'] === 'success' ? '已保存' : '保存 OpenAI 配置'}
+                      </button>
+                      <div className="p-3 bg-amber-50 border border-amber-100 rounded-xl">
+                        <p className="text-[10px] text-amber-700 leading-relaxed">
+                          前端保存 API Key 仅适合个人使用。如果要公开给他人使用，请改用 Netlify 环境变量。
                         </p>
                       </div>
                       <p className="text-[10px] text-gray-400">
-                        默认模型由后端读取 OPENAI_MODEL，未配置时使用 gpt-4.1-mini。
+                        未填写前端 Key 时，会继续尝试读取 Netlify 环境变量 OPENAI_API_KEY。
                       </p>
                     </div>
 
