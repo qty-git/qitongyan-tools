@@ -17,6 +17,8 @@ interface SettingsModalProps {
   setOpenaiKey: (key: string) => void;
   openaiModel: string;
   setOpenaiModel: (model: string) => void;
+  openrouterBaseURL: string;
+  setOpenrouterBaseURL: (baseURL: string) => void;
   showOpenaiKey: boolean;
   setShowOpenaiKey: (show: boolean) => void;
   doubaoKey: string;
@@ -50,6 +52,8 @@ export function SettingsModal({
   setOpenaiKey,
   openaiModel,
   setOpenaiModel,
+  openrouterBaseURL,
+  setOpenrouterBaseURL,
   showOpenaiKey,
   setShowOpenaiKey,
   doubaoKey,
@@ -104,6 +108,9 @@ export function SettingsModal({
         qwenKey,
         openaiKey,
         openaiModel,
+        openrouterKey: openaiKey,
+        openrouterModel: openaiModel,
+        openrouterBaseURL,
         provider,
         apiKey: provider === 'gemini' ? geminiKey : (provider === 'doubao' ? doubaoKey : (provider === 'qwen' ? qwenKey : '')),
         model: openaiModel
@@ -222,7 +229,7 @@ export function SettingsModal({
                         )}
                       >
                         <Cloud size={16} />
-                        OpenAI 后端
+                        OpenRouter
                       </button>
                       <button
                         onClick={() => setLlmProvider('doubao')}
@@ -263,8 +270,8 @@ export function SettingsModal({
                         <div>
                           <h3 className="text-sm font-bold text-blue-900">智能轮询模式已开启</h3>
                           <p className="text-[10px] text-blue-700 mt-1 leading-relaxed">
-                            系统将按顺序尝试调用模型：<span className="font-bold underline">Gemini ➔ OpenAI 后端 ➔ 豆包 ➔ 通义千问</span>。<br />
-                            OpenAI 可使用系统设置中的个人 Key，也可继续使用 Netlify 环境变量。
+                            系统将按顺序尝试调用模型：<span className="font-bold underline">Gemini ➔ OpenRouter ➔ 豆包 ➔ 通义千问</span>。<br />
+                            OpenRouter 可直接在系统设置中填写个人 Key。
                           </p>
                         </div>
                       </div>
@@ -326,18 +333,18 @@ export function SettingsModal({
                         </button>
                       </div>
                       <p className="text-[10px] text-gray-400">
-                        使用模型: gemini-2.5-flash。若出现地区限制，请使用 OpenAI 后端或智能轮询。
+                        使用模型: gemini-2.5-flash。若出现地区限制，请使用 OpenRouter 或智能轮询。
                       </p>
                     </div>
 
-                    {/* OpenAI Section */}
+                    {/* OpenRouter Section */}
                     <div className={cn(
                       "space-y-3 p-4 rounded-2xl border transition-all",
                       llmProvider === 'openai' ? "bg-blue-50/30 border-blue-200 ring-1 ring-blue-100" : "bg-gray-50 border-gray-100"
                     )}>
                       <div className="flex items-center justify-between">
                         <label className="text-sm font-bold text-gray-700 flex items-center gap-2">
-                          ☁️ OpenAI 后端 {llmProvider === 'auto' && '(备选 1)'}
+                          ☁️ OpenRouter {llmProvider === 'auto' && '(备选 1)'}
                         </label>
                         <div className="flex items-center gap-2">
                           {openaiKey && <span className="text-[10px] text-green-600 font-bold">已配置</span>}
@@ -371,7 +378,7 @@ export function SettingsModal({
                           type={showOpenaiKey ? "text" : "password"}
                           value={openaiKey}
                           onChange={(e) => setOpenaiKey(e.target.value)}
-                          placeholder="输入 OpenAI API Key..."
+                          placeholder="输入 OpenRouter API Key..."
                           className="w-full pl-10 pr-10 py-3 bg-white border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm"
                         />
                         <button
@@ -388,7 +395,24 @@ export function SettingsModal({
                           type="text"
                           value={openaiModel}
                           onChange={(e) => setOpenaiModel(e.target.value)}
-                          placeholder="gpt-4.1-mini"
+                          placeholder="openai/gpt-4.1-mini"
+                          list="openrouter-model-options"
+                          className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-xs"
+                        />
+                        <datalist id="openrouter-model-options">
+                          <option value="openai/gpt-4.1-mini" />
+                          <option value="google/gemini-2.5-pro" />
+                          <option value="anthropic/claude-3.7-sonnet" />
+                          <option value="deepseek/deepseek-chat" />
+                        </datalist>
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-bold text-gray-400 uppercase">Base URL</label>
+                        <input 
+                          type="text"
+                          value={openrouterBaseURL}
+                          onChange={(e) => setOpenrouterBaseURL(e.target.value)}
+                          placeholder="https://openrouter.ai/api/v1"
                           className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-xs"
                         />
                       </div>
@@ -403,15 +427,15 @@ export function SettingsModal({
                         )}
                       >
                         {testStatus['openaiSave'] === 'success' ? <CheckCircle2 size={14} /> : <Key size={14} />}
-                        {testStatus['openaiSave'] === 'success' ? '已保存' : '保存 OpenAI 配置'}
+                        {testStatus['openaiSave'] === 'success' ? '已保存' : '保存 OpenRouter 配置'}
                       </button>
                       <div className="p-3 bg-amber-50 border border-amber-100 rounded-xl">
                         <p className="text-[10px] text-amber-700 leading-relaxed">
-                          前端保存 API Key 仅适合个人使用。如果要公开给他人使用，请改用 Netlify 环境变量。
+                          前端保存 API Key 仅适合个人使用，请不要在公共网站暴露自己的 Key。
                         </p>
                       </div>
                       <p className="text-[10px] text-gray-400">
-                        未填写前端 Key 时，会继续尝试读取 Netlify 环境变量 OPENAI_API_KEY。
+                        未填写前端 Key 时，会继续尝试读取 Netlify 环境变量 OPENROUTER_API_KEY。
                       </p>
                     </div>
 

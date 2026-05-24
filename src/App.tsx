@@ -157,8 +157,9 @@ function AppContent() {
   // LLM Configuration
   const [llmProvider, setLlmProvider] = useState<LLMProvider>(() => (localStorage.getItem('llm_provider') as LLMProvider) || 'auto');
   const [geminiKey, setGeminiKey] = useState(() => localStorage.getItem('gemini_key') || import.meta.env.VITE_GEMINI_API_KEY || '');
-  const [openaiKey, setOpenaiKey] = useState(() => localStorage.getItem('openai_key') || '');
-  const [openaiModel, setOpenaiModel] = useState(() => localStorage.getItem('openai_model') || 'gpt-4.1-mini');
+  const [openaiKey, setOpenaiKey] = useState(() => localStorage.getItem('openrouter_key') || localStorage.getItem('openai_key') || '');
+  const [openaiModel, setOpenaiModel] = useState(() => localStorage.getItem('openrouter_model') || localStorage.getItem('openai_model') || 'openai/gpt-4.1-mini');
+  const [openrouterBaseURL, setOpenrouterBaseURL] = useState(() => localStorage.getItem('openrouter_base_url') || 'https://openrouter.ai/api/v1');
   const [qwenKey, setQwenKey] = useState(() => localStorage.getItem('qwen_key') || import.meta.env.VITE_QWEN_API_KEY || '');
   const [doubaoKey, setDoubaoKey] = useState(() => localStorage.getItem('doubao_key') || import.meta.env.VITE_DOUBAO_API_KEY || '');
   const [doubaoEndpoint, setDoubaoEndpoint] = useState(() => localStorage.getItem('doubao_endpoint') || import.meta.env.VITE_DOUBAO_ENDPOINT || '');
@@ -214,11 +215,14 @@ function AppContent() {
     localStorage.setItem('gemini_key', geminiKey);
   }, [geminiKey]);
   useEffect(() => {
-    localStorage.setItem('openai_key', openaiKey);
+    localStorage.setItem('openrouter_key', openaiKey);
   }, [openaiKey]);
   useEffect(() => {
-    localStorage.setItem('openai_model', openaiModel);
+    localStorage.setItem('openrouter_model', openaiModel);
   }, [openaiModel]);
+  useEffect(() => {
+    localStorage.setItem('openrouter_base_url', openrouterBaseURL);
+  }, [openrouterBaseURL]);
   useEffect(() => {
     localStorage.setItem('qwen_key', qwenKey);
   }, [qwenKey]);
@@ -452,7 +456,7 @@ function AppContent() {
 
   const getLLMConfig = (): LLMConfig | null => {
     if (llmProvider !== 'auto' && llmProvider !== 'openai' && !geminiKey && !doubaoKey && !qwenKey) {
-      setError("请至少在设置中配置一个模型的 API Key，或切换到 OpenAI 后端模式并在 Netlify 配置 OPENAI_API_KEY");
+      setError("请至少在设置中配置一个模型的 API Key，或切换到 OpenRouter 并填写 OpenRouter API Key");
       setShowSettings(true);
       return null;
     }
@@ -467,10 +471,13 @@ function AppContent() {
       provider: llmProvider,
       apiKey: llmProvider === 'gemini' ? geminiKey : (llmProvider === 'doubao' ? doubaoKey : (llmProvider === 'qwen' ? qwenKey : '')),
       baseURL: llmProvider === 'doubao' ? doubaoEndpoint : (llmProvider === 'qwen' ? 'https://dashscope.aliyuncs.com/compatible-mode/v1' : undefined),
-      model: llmProvider === 'doubao' ? doubaoVisionModel : (llmProvider === 'qwen' ? 'qwen-vl-max' : (llmProvider === 'openai' ? 'openai-serverless' : 'models/gemini-2.5-flash')),
+      model: llmProvider === 'doubao' ? doubaoVisionModel : (llmProvider === 'qwen' ? 'qwen-vl-max' : (llmProvider === 'openai' ? 'openrouter-serverless' : 'models/gemini-2.5-flash')),
       geminiKey: geminiKey,
       openaiKey: openaiKey,
       openaiModel: openaiModel,
+      openrouterKey: openaiKey,
+      openrouterModel: openaiModel,
+      openrouterBaseURL: openrouterBaseURL,
       doubaoKey: doubaoKey,
       doubaoEndpoint: doubaoEndpoint,
       qwenKey: qwenKey,
@@ -682,10 +689,13 @@ function AppContent() {
         provider: llmProvider,
         apiKey: llmProvider === 'gemini' ? geminiKey : (llmProvider === 'doubao' ? doubaoKey : (llmProvider === 'qwen' ? qwenKey : '')),
         baseURL: llmProvider === 'doubao' ? doubaoEndpoint : (llmProvider === 'qwen' ? 'https://dashscope.aliyuncs.com/compatible-mode/v1' : undefined),
-        model: llmProvider === 'doubao' ? doubaoVisionModel : (llmProvider === 'qwen' ? 'qwen-vl-max' : (llmProvider === 'openai' ? 'openai-serverless' : 'models/gemini-2.5-flash')),
+        model: llmProvider === 'doubao' ? doubaoVisionModel : (llmProvider === 'qwen' ? 'qwen-vl-max' : (llmProvider === 'openai' ? 'openrouter-serverless' : 'models/gemini-2.5-flash')),
         geminiKey: geminiKey,
         openaiKey: openaiKey,
         openaiModel: openaiModel,
+        openrouterKey: openaiKey,
+        openrouterModel: openaiModel,
+        openrouterBaseURL: openrouterBaseURL,
         doubaoKey: doubaoKey,
         doubaoEndpoint: doubaoEndpoint,
         qwenKey: qwenKey,
@@ -894,7 +904,7 @@ function AppContent() {
                   <div className="flex items-center gap-1.5">
                     <div className={cn("w-1.5 h-1.5 rounded-full", isExtracting ? "bg-green-500 animate-pulse" : "bg-blue-500")} />
                     <span className="text-xs font-black text-gray-700">
-                      {currentAttemptingModel || (llmProvider === 'auto' ? '智能轮询 (待命)' : (llmProvider === 'gemini' ? 'Gemini 2.5' : llmProvider === 'openai' ? 'OpenAI 后端' : llmProvider === 'doubao' ? '豆包 Pro' : '千问 Max'))}
+                      {currentAttemptingModel || (llmProvider === 'auto' ? '智能轮询 (待命)' : (llmProvider === 'gemini' ? 'Gemini 2.5' : llmProvider === 'openai' ? 'OpenRouter' : llmProvider === 'doubao' ? '豆包 Pro' : '千问 Max'))}
                     </span>
                   </div>
                 </div>
@@ -1041,6 +1051,8 @@ function AppContent() {
         setOpenaiKey={setOpenaiKey}
         openaiModel={openaiModel}
         setOpenaiModel={setOpenaiModel}
+        openrouterBaseURL={openrouterBaseURL}
+        setOpenrouterBaseURL={setOpenrouterBaseURL}
         showOpenaiKey={showOpenaiKey}
         setShowOpenaiKey={setShowOpenaiKey}
         doubaoKey={doubaoKey}

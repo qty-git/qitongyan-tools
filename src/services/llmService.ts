@@ -8,6 +8,9 @@ export interface LLMConfig {
   geminiKey?: string;
   openaiKey?: string;
   openaiModel?: string;
+  openrouterKey?: string;
+  openrouterModel?: string;
+  openrouterBaseURL?: string;
   doubaoKey?: string;
   doubaoVisionModel?: string;
   doubaoTextModel?: string;
@@ -51,8 +54,10 @@ const parseApiError = (error: any, providerName: string): string => {
 
   if (errMsg.includes('401') || errMsg.includes('Incorrect API key') || errMsg.includes('API key not valid') || errMsg.includes('invalid_api_key')) {
     reason = "API Key 无效或未授权 (401)";
-  } else if (errMsg.includes('429') || errMsg.includes('Too Many Requests') || errMsg.includes('quota') || errMsg.includes('insufficient_quota') || errMsg.includes('exhausted')) {
-    reason = "调用次数过多、并发超限或余额不足 (429)";
+  } else if (errMsg.includes('模型不存在') || errMsg.includes('model_not_found') || errMsg.includes('does not exist')) {
+    reason = "模型不存在";
+  } else if (errMsg.includes('余额不足') || errMsg.includes('429') || errMsg.includes('402') || errMsg.includes('Too Many Requests') || errMsg.includes('quota') || errMsg.includes('insufficient_quota') || errMsg.includes('exhausted') || errMsg.includes('credit') || errMsg.includes('balance')) {
+    reason = "调用次数过多、并发超限或余额不足";
   } else if (errMsg.includes('500') || errMsg.includes('Internal Server Error')) {
     reason = "服务器内部错误 (500)";
   } else if (errMsg.includes('503') || errMsg.includes('Service Unavailable') || errMsg.includes('overloaded')) {
@@ -296,20 +301,27 @@ async function callOpenAIVision(imageBase64: string, prompt: string, config: { a
 
 async function callOpenAIServerless(imageBase64: string | null, prompt: string, config: LLMConfig): Promise<ExtractionResult> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (config.openaiKey) {
-    headers.Authorization = `Bearer ${config.openaiKey}`;
+  const apiKey = config.openrouterKey || config.openaiKey;
+  if (apiKey) {
+    headers.Authorization = `Bearer ${apiKey}`;
   }
 
   const response = await withRetry(async () => {
     const res = await fetch('/.netlify/functions/openai', {
       method: 'POST',
       headers,
-      body: JSON.stringify({ action: 'vision', imageBase64, prompt, model: config.openaiModel || 'gpt-4.1-mini' })
+      body: JSON.stringify({
+        action: 'vision',
+        imageBase64,
+        prompt,
+        model: config.openrouterModel || config.openaiModel || 'openai/gpt-4.1-mini',
+        baseURL: config.openrouterBaseURL || 'https://openrouter.ai/api/v1'
+      })
     });
 
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-      throw new Error(data.error || `OpenAI 后端调用失败 (${res.status})`);
+      throw new Error(data.error || `OpenRouter 调用失败 (${res.status})`);
     }
     return data;
   });
@@ -389,17 +401,17 @@ export async function extractAttributesOnly(
     }
   }
 
-  // 2. Try OpenAI via Netlify Function
+  // 2. Try OpenRouter via Netlify Function
   if (config.provider === 'openai' || config.provider === 'auto') {
-    config.onModelChange?.('OpenAI');
+    config.onModelChange?.('OpenRouter');
     try {
       const result = await callOpenAIServerless(imageBase64, getPrompt('openai'), config);
       return result.attributes || {};
     } catch (e) {
-      console.warn("OpenAI attributes extraction failed...", e);
-      const errorMsg = parseApiError(e, 'OpenAI');
+      console.warn("OpenRouter attributes extraction failed...", e);
+      const errorMsg = parseApiError(e, 'OpenRouter');
       errors.push(errorMsg);
-      if (config.provider === 'auto') config.onWarning?.(`OpenAI 后端调用失败，已自动切换备选模型。\n原因: ${errorMsg}`);
+      if (config.provider === 'auto') config.onWarning?.(`OpenRouter 调用失败，已自动切换备选模型。\n原因: ${errorMsg}`);
       else throw new Error(errorMsg);
     }
   }
@@ -541,17 +553,17 @@ export async function generateTitlesOnly(
     }
   }
 
-  // 2. Try OpenAI via Netlify Function
+  // 2. Try OpenRouter via Netlify Function
   if (config.provider === 'openai' || config.provider === 'auto') {
-    config.onModelChange?.('OpenAI');
+    config.onModelChange?.('OpenRouter');
     try {
       const result = await callOpenAIServerless(imageBase64, getPrompt('openai'), config);
       return { title: result.title || "", subtitle: result.subtitle || "" };
     } catch (e) {
-      console.warn("OpenAI title generation failed...", e);
-      const errorMsg = parseApiError(e, 'OpenAI');
+      console.warn("OpenRouter title generation failed...", e);
+      const errorMsg = parseApiError(e, 'OpenRouter');
       errors.push(errorMsg);
-      if (config.provider === 'auto') config.onWarning?.(`OpenAI 后端调用失败，已自动切换备选模型。\n原因: ${errorMsg}`);
+      if (config.provider === 'auto') config.onWarning?.(`OpenRouter 调用失败，已自动切换备选模型。\n原因: ${errorMsg}`);
       else throw new Error(errorMsg);
     }
   }
@@ -671,18 +683,18 @@ export async function generateProductNamesOnly(
     }
   }
 
-  // 2. Try OpenAI via Netlify Function
+  // 2. Try OpenRouter via Netlify Function
   if (config.provider === 'openai' || config.provider === 'auto') {
-    config.onModelChange?.('OpenAI');
+    config.onModelChange?.('OpenRouter');
     try {
       const result = await callOpenAIServerless(imageBase64, prompt, config);
       return result.productNames;
     } catch (e) {
-      console.warn("OpenAI name generation failed, falling back...", e);
-      const errorMsg = parseApiError(e, 'OpenAI');
+      console.warn("OpenRouter name generation failed, falling back...", e);
+      const errorMsg = parseApiError(e, 'OpenRouter');
       errors.push(errorMsg);
       if (config.provider === 'auto') {
-        config.onWarning?.(`OpenAI 后端调用失败，已自动切换备选模型。\n原因: ${errorMsg}`);
+        config.onWarning?.(`OpenRouter 调用失败，已自动切换备选模型。\n原因: ${errorMsg}`);
       } else {
         throw new Error(errorMsg);
       }
@@ -834,9 +846,9 @@ export async function generateEverything(
     }
   }
 
-  // 2. Try OpenAI via Netlify Function
+  // 2. Try OpenRouter via Netlify Function
   if (config.provider === 'openai' || config.provider === 'auto') {
-    config.onModelChange?.('OpenAI');
+    config.onModelChange?.('OpenRouter');
     try {
       const result = await callOpenAIServerless(imageBase64, getPrompt('openai'), config);
       return {
@@ -845,11 +857,11 @@ export async function generateEverything(
         productNames: result.productNames || []
       };
     } catch (e) {
-      console.warn("OpenAI mixed generation failed...", e);
-      const errorMsg = parseApiError(e, 'OpenAI');
+      console.warn("OpenRouter mixed generation failed...", e);
+      const errorMsg = parseApiError(e, 'OpenRouter');
       errors.push(errorMsg);
       if (config.provider === 'auto') {
-        config.onWarning?.(`OpenAI 后端调用失败，已自动切换备选模型。\n原因: ${errorMsg}`);
+        config.onWarning?.(`OpenRouter 调用失败，已自动切换备选模型。\n原因: ${errorMsg}`);
       } else throw new Error(errorMsg);
     }
   }
@@ -946,16 +958,21 @@ export async function testModelConnection(provider: LLMProvider, config: LLMConf
       return !!response.text;
     } else if (provider === 'openai') {
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (config.openaiKey) {
-        headers.Authorization = `Bearer ${config.openaiKey}`;
+      const apiKey = config.openrouterKey || config.openaiKey;
+      if (apiKey) {
+        headers.Authorization = `Bearer ${apiKey}`;
       }
       const res = await fetch('/.netlify/functions/openai', {
         method: 'POST',
         headers,
-        body: JSON.stringify({ action: 'test', model: config.openaiModel || 'gpt-4.1-mini' })
+        body: JSON.stringify({
+          action: 'test',
+          model: config.openrouterModel || config.openaiModel || 'openai/gpt-4.1-mini',
+          baseURL: config.openrouterBaseURL || 'https://openrouter.ai/api/v1'
+        })
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || `OpenAI 后端测试失败 (${res.status})`);
+      if (!res.ok) throw new Error(data.error || `OpenRouter 后端测试失败 (${res.status})`);
       return !!data.ok;
     } else if (provider === 'doubao') {
       const client = getOpenAIClient(config.doubaoKey || config.apiKey, config.doubaoEndpoint || config.baseURL || "https://ark.cn-beijing.volces.com/api/v3");
