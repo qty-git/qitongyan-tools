@@ -2,7 +2,7 @@ import { GoogleGenAI, GenerateContentResponse } from "@google/genai";
 import OpenAI from "openai";
 import { DEFAULT_PROMPTS } from "./prompts";
 
-export type LLMProvider = 'gemini' | 'qwen' | 'doubao' | 'auto';
+export type LLMProvider = 'gemini' | 'openai' | 'qwen' | 'doubao' | 'auto';
 
 export interface LLMConfig {
   geminiKey?: string;
@@ -57,9 +57,25 @@ const parseApiError = (error: any, providerName: string): string => {
     reason = "服务不可用或服务器过载 (503)";
   } else if (errMsg.includes('fetch failed') || errMsg.includes('NetworkError') || errMsg.includes('ECONNREFUSED') || errMsg.includes('timeout') || errMsg.includes('Failed to fetch')) {
     reason = "网络连接失败、超时或跨域拦截 (Network Error)";
+  } else if (errMsg.includes('User location is not supported') || errMsg.includes('FAILED_PRECONDITION')) {
+    reason = "当前访问地区不支持该 API (FAILED_PRECONDITION)";
   }
 
   return `[${providerName}] ${reason}`;
+};
+
+const promptProviderFor = (provider: string) => provider === 'openai' ? 'gemini' : provider;
+
+const flattenProductNames = (parsed: any): string[] => {
+  if (!parsed.productNames) return [];
+  if (Array.isArray(parsed.productNames)) return parsed.productNames;
+
+  return [
+    ...(parsed.productNames.sweet || []),
+    ...(parsed.productNames.cute || []),
+    ...(parsed.productNames.clothing_style || []),
+    ...(parsed.productNames.random_length || [])
+  ];
 };
 
 // Gemini Circuit Breaker Helpers
@@ -276,6 +292,30 @@ async function callOpenAIVision(imageBase64: string, prompt: string, config: { a
   };
 }
 
+async function callOpenAIServerless(imageBase64: string | null, prompt: string): Promise<ExtractionResult> {
+  const response = await withRetry(async () => {
+    const res = await fetch('/.netlify/functions/openai', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'vision', imageBase64, prompt })
+    });
+
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.error || `OpenAI 后端调用失败 (${res.status})`);
+    }
+    return data;
+  });
+
+  const parsed = response.result || response;
+  return {
+    attributes: parsed.attributes || {},
+    title: parsed.title || "",
+    subtitle: parsed.subtitle || "",
+    productNames: flattenProductNames(parsed)
+  };
+}
+
 export async function extractAttributesOnly(
   imageBase64: string,
   category: string,
@@ -284,7 +324,7 @@ export async function extractAttributesOnly(
   config: LLMConfig
 ): Promise<Record<string, string>> {
   const getPrompt = (provider: string) => {
-    const actualProvider = provider === 'auto' ? 'gemini' : provider;
+    const actualProvider = promptProviderFor(provider === 'auto' ? 'gemini' : provider);
     const template = config.customPrompts?.attributesOnly?.[actualProvider] || DEFAULT_PROMPTS.attributesOnly[actualProvider as keyof typeof DEFAULT_PROMPTS.attributesOnly] || DEFAULT_PROMPTS.attributesOnly.gemini;
     
     const attributesList = attributes
@@ -342,7 +382,22 @@ export async function extractAttributesOnly(
     }
   }
 
-  // 2. Try Doubao
+  // 2. Try OpenAI via Netlify Function
+  if (config.provider === 'openai' || config.provider === 'auto') {
+    config.onModelChange?.('OpenAI');
+    try {
+      const result = await callOpenAIServerless(imageBase64, getPrompt('openai'));
+      return result.attributes || {};
+    } catch (e) {
+      console.warn("OpenAI attributes extraction failed...", e);
+      const errorMsg = parseApiError(e, 'OpenAI');
+      errors.push(errorMsg);
+      if (config.provider === 'auto') config.onWarning?.(`OpenAI 后端调用失败，已自动切换备选模型。\n原因: ${errorMsg}`);
+      else throw new Error(errorMsg);
+    }
+  }
+
+  // 3. Try Doubao
   if (config.provider === 'doubao' || (config.provider === 'auto' && (config.doubaoKey || config.apiKey))) {
     if (config.doubaoKey || (config.provider === 'doubao' && config.apiKey)) {
       config.onModelChange?.('Doubao');
@@ -377,7 +432,7 @@ export async function extractAttributesOnly(
     }
   }
 
-  // 3. Try Qwen
+  // 4. Try Qwen
   if (config.provider === 'qwen' || (config.provider === 'auto' && (config.qwenKey || config.apiKey))) {
     if (config.qwenKey || (config.provider === 'qwen' && config.apiKey)) {
       config.onModelChange?.('Qwen');
@@ -425,7 +480,7 @@ export async function generateTitlesOnly(
 ): Promise<{ title: string; subtitle: string }> {
   const [minLen, maxLen] = titleLengthRange;
   const getPrompt = (provider: string) => {
-    const actualProvider = provider === 'auto' ? 'gemini' : provider;
+    const actualProvider = promptProviderFor(provider === 'auto' ? 'gemini' : provider);
     const template = config.customPrompts?.titleOnly?.[actualProvider] || DEFAULT_PROMPTS.titleOnly[actualProvider as keyof typeof DEFAULT_PROMPTS.titleOnly] || DEFAULT_PROMPTS.titleOnly.gemini;
     
     return replacePlaceholders(template, {
@@ -479,7 +534,22 @@ export async function generateTitlesOnly(
     }
   }
 
-  // 2. Try Doubao
+  // 2. Try OpenAI via Netlify Function
+  if (config.provider === 'openai' || config.provider === 'auto') {
+    config.onModelChange?.('OpenAI');
+    try {
+      const result = await callOpenAIServerless(imageBase64, getPrompt('openai'));
+      return { title: result.title || "", subtitle: result.subtitle || "" };
+    } catch (e) {
+      console.warn("OpenAI title generation failed...", e);
+      const errorMsg = parseApiError(e, 'OpenAI');
+      errors.push(errorMsg);
+      if (config.provider === 'auto') config.onWarning?.(`OpenAI 后端调用失败，已自动切换备选模型。\n原因: ${errorMsg}`);
+      else throw new Error(errorMsg);
+    }
+  }
+
+  // 3. Try Doubao
   if (config.provider === 'doubao' || (config.provider === 'auto' && (config.doubaoKey || config.apiKey))) {
     if (config.doubaoKey || (config.provider === 'doubao' && config.apiKey)) {
       config.onModelChange?.('Doubao');
@@ -514,7 +584,7 @@ export async function generateTitlesOnly(
     }
   }
 
-  // 3. Try Qwen
+  // 4. Try Qwen
   if (config.provider === 'qwen' || (config.provider === 'auto' && (config.qwenKey || config.apiKey))) {
     if (config.qwenKey || (config.provider === 'qwen' && config.apiKey)) {
       config.onModelChange?.('Qwen');
@@ -558,7 +628,7 @@ export async function generateProductNamesOnly(
   config: LLMConfig,
   namingFeedback?: string
 ): Promise<string[]> {
-  const actualProvider = config.provider === 'auto' ? 'gemini' : config.provider;
+  const actualProvider = promptProviderFor(config.provider === 'auto' ? 'gemini' : config.provider);
   const template = config.customPrompts?.naming?.[actualProvider] || DEFAULT_PROMPTS.naming[actualProvider as keyof typeof DEFAULT_PROMPTS.naming] || DEFAULT_PROMPTS.naming.gemini;
   
   const prompt = replacePlaceholders(template, {
@@ -594,7 +664,25 @@ export async function generateProductNamesOnly(
     }
   }
 
-  // 2. Try Doubao
+  // 2. Try OpenAI via Netlify Function
+  if (config.provider === 'openai' || config.provider === 'auto') {
+    config.onModelChange?.('OpenAI');
+    try {
+      const result = await callOpenAIServerless(imageBase64, prompt);
+      return result.productNames;
+    } catch (e) {
+      console.warn("OpenAI name generation failed, falling back...", e);
+      const errorMsg = parseApiError(e, 'OpenAI');
+      errors.push(errorMsg);
+      if (config.provider === 'auto') {
+        config.onWarning?.(`OpenAI 后端调用失败，已自动切换备选模型。\n原因: ${errorMsg}`);
+      } else {
+        throw new Error(errorMsg);
+      }
+    }
+  }
+
+  // 3. Try Doubao
   if (config.provider === 'doubao' || (config.provider === 'auto' && (config.doubaoKey || config.apiKey))) {
     if (config.doubaoKey || (config.provider === 'doubao' && config.apiKey)) {
       config.onModelChange?.('Doubao');
@@ -621,7 +709,7 @@ export async function generateProductNamesOnly(
     }
   }
 
-  // 3. Try Qwen
+  // 4. Try Qwen
   if (config.provider === 'qwen' || (config.provider === 'auto' && (config.qwenKey || config.apiKey))) {
     if (config.qwenKey || (config.provider === 'qwen' && config.apiKey)) {
       config.onModelChange?.('Qwen');
@@ -666,7 +754,7 @@ export async function generateEverything(
 ): Promise<{ title: string; subtitle: string; productNames: string[] }> {
   const [minLen, maxLen] = titleLengthRange;
   const getPrompt = (provider: string) => {
-    const actualProvider = provider === 'auto' ? 'gemini' : provider;
+    const actualProvider = promptProviderFor(provider === 'auto' ? 'gemini' : provider);
     const template = config.customPrompts?.allInOne?.[actualProvider] || DEFAULT_PROMPTS.allInOne[actualProvider as keyof typeof DEFAULT_PROMPTS.allInOne] || DEFAULT_PROMPTS.allInOne.gemini;
     
     return replacePlaceholders(template, {
@@ -739,7 +827,27 @@ export async function generateEverything(
     }
   }
 
-  // 2. Try Doubao
+  // 2. Try OpenAI via Netlify Function
+  if (config.provider === 'openai' || config.provider === 'auto') {
+    config.onModelChange?.('OpenAI');
+    try {
+      const result = await callOpenAIServerless(imageBase64, getPrompt('openai'));
+      return {
+        title: result.title || "",
+        subtitle: result.subtitle || "",
+        productNames: result.productNames || []
+      };
+    } catch (e) {
+      console.warn("OpenAI mixed generation failed...", e);
+      const errorMsg = parseApiError(e, 'OpenAI');
+      errors.push(errorMsg);
+      if (config.provider === 'auto') {
+        config.onWarning?.(`OpenAI 后端调用失败，已自动切换备选模型。\n原因: ${errorMsg}`);
+      } else throw new Error(errorMsg);
+    }
+  }
+
+  // 3. Try Doubao
   if (config.provider === 'doubao' || (config.provider === 'auto' && (config.doubaoKey || config.apiKey))) {
     if (config.doubaoKey || (config.provider === 'doubao' && config.apiKey)) {
       config.onModelChange?.('Doubao');
@@ -777,7 +885,7 @@ export async function generateEverything(
     }
   }
 
-  // 3. Try Qwen
+  // 4. Try Qwen
   if (config.provider === 'qwen' || (config.provider === 'auto' && (config.qwenKey || config.apiKey))) {
     if (config.qwenKey || (config.provider === 'qwen' && config.apiKey)) {
       config.onModelChange?.('Qwen');
@@ -829,6 +937,15 @@ export async function testModelConnection(provider: LLMProvider, config: LLMConf
         config: { responseMimeType: "application/json" }
       });
       return !!response.text;
+    } else if (provider === 'openai') {
+      const res = await fetch('/.netlify/functions/openai', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'test' })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `OpenAI 后端测试失败 (${res.status})`);
+      return !!data.ok;
     } else if (provider === 'doubao') {
       const client = getOpenAIClient(config.doubaoKey || config.apiKey, config.doubaoEndpoint || config.baseURL || "https://ark.cn-beijing.volces.com/api/v3");
       const response = await client.chat.completions.create({

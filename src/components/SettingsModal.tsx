@@ -91,7 +91,7 @@ export function SettingsModal({
         doubaoEndpoint,
         qwenKey,
         provider,
-        apiKey: provider === 'gemini' ? geminiKey : (provider === 'doubao' ? doubaoKey : qwenKey),
+        apiKey: provider === 'gemini' ? geminiKey : (provider === 'doubao' ? doubaoKey : (provider === 'qwen' ? qwenKey : '')),
         model: '' // Not needed for simple test
       };
       await testModelConnection(provider, config as any);
@@ -199,6 +199,18 @@ export function SettingsModal({
                         仅使用 Gemini
                       </button>
                       <button
+                        onClick={() => setLlmProvider('openai')}
+                        className={cn(
+                          "flex items-center justify-center gap-2 py-3 px-4 rounded-2xl border-2 transition-all font-bold text-sm",
+                          llmProvider === 'openai' 
+                            ? "border-blue-600 bg-blue-50 text-blue-700 shadow-sm" 
+                            : "border-gray-100 bg-gray-50 text-gray-500 hover:border-gray-200"
+                        )}
+                      >
+                        <Cloud size={16} />
+                        OpenAI 后端
+                      </button>
+                      <button
                         onClick={() => setLlmProvider('doubao')}
                         className={cn(
                           "flex items-center justify-center gap-2 py-3 px-4 rounded-2xl border-2 transition-all font-bold text-sm",
@@ -237,8 +249,8 @@ export function SettingsModal({
                         <div>
                           <h3 className="text-sm font-bold text-blue-900">智能轮询模式已开启</h3>
                           <p className="text-[10px] text-blue-700 mt-1 leading-relaxed">
-                            系统将按顺序尝试调用模型：<span className="font-bold underline">Gemini ➔ 豆包 ➔ 通义千问</span>。<br />
-                            如果首选模型受限或报错，将自动切换至下一个可用模型。请确保至少配置一个有效的 API Key。
+                            系统将按顺序尝试调用模型：<span className="font-bold underline">Gemini ➔ OpenAI 后端 ➔ 豆包 ➔ 通义千问</span>。<br />
+                            OpenAI Key 从 Netlify 环境变量读取，不会暴露在浏览器中。
                           </p>
                         </div>
                       </div>
@@ -300,7 +312,49 @@ export function SettingsModal({
                         </button>
                       </div>
                       <p className="text-[10px] text-gray-400">
-                        使用模型: gemini-1.5-flash (提取) / gemini-1.5-pro (精修)
+                        使用模型: gemini-2.5-flash。若出现地区限制，请使用 OpenAI 后端或智能轮询。
+                      </p>
+                    </div>
+
+                    {/* OpenAI Section */}
+                    <div className={cn(
+                      "space-y-3 p-4 rounded-2xl border transition-all",
+                      llmProvider === 'openai' ? "bg-blue-50/30 border-blue-200 ring-1 ring-blue-100" : "bg-gray-50 border-gray-100"
+                    )}>
+                      <div className="flex items-center justify-between">
+                        <label className="text-sm font-bold text-gray-700 flex items-center gap-2">
+                          ☁️ OpenAI 后端 {llmProvider === 'auto' && '(备选 1)'}
+                        </label>
+                        <button
+                          onClick={() => handleTest('openai')}
+                          disabled={testStatus['openai'] === 'loading'}
+                          className={cn(
+                            "flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold transition-all",
+                            testStatus['openai'] === 'success' ? "bg-green-100 text-green-700" :
+                            testStatus['openai'] === 'error' ? "bg-red-100 text-red-700" :
+                            "bg-white border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+                          )}
+                        >
+                          {testStatus['openai'] === 'loading' ? <Loader2 size={10} className="animate-spin" /> : 
+                           testStatus['openai'] === 'success' ? <CheckCircle2 size={10} /> :
+                           testStatus['openai'] === 'error' ? <AlertCircle size={10} /> : <Play size={10} />}
+                          {testStatus['openai'] === 'loading' ? '测试中...' : 
+                           testStatus['openai'] === 'success' ? '连接成功' :
+                           testStatus['openai'] === 'error' ? '连接失败' : '测试连接'}
+                        </button>
+                      </div>
+                      {testStatus['openai'] === 'error' && (
+                        <p className="text-[10px] text-red-500 bg-red-50 p-2 rounded-lg border border-red-100">
+                          {testError['openai']}
+                        </p>
+                      )}
+                      <div className="p-3 bg-white border border-gray-200 rounded-xl">
+                        <p className="text-[10px] text-gray-500 leading-relaxed">
+                          请在 Netlify Site settings → Environment variables 中配置 <span className="font-bold text-gray-700">OPENAI_API_KEY</span>。前端不会保存或展示 OpenAI Key。
+                        </p>
+                      </div>
+                      <p className="text-[10px] text-gray-400">
+                        默认模型由后端读取 OPENAI_MODEL，未配置时使用 gpt-4.1-mini。
                       </p>
                     </div>
 
@@ -311,7 +365,7 @@ export function SettingsModal({
                     )}>
                       <div className="flex items-center justify-between">
                         <label className="text-sm font-bold text-gray-700 flex items-center gap-2">
-                          📦 豆包 {llmProvider === 'auto' && '(备选 1)'}
+                          📦 豆包 {llmProvider === 'auto' && '(备选 2)'}
                         </label>
                         <div className="flex items-center gap-2">
                           {doubaoKey && doubaoVisionModel && doubaoTextModel && <span className="text-[10px] text-green-600 font-bold">已配置</span>}
@@ -400,7 +454,7 @@ export function SettingsModal({
                     )}>
                       <div className="flex items-center justify-between">
                         <label className="text-sm font-bold text-gray-700 flex items-center gap-2">
-                          ☁️ 通义千问 {llmProvider === 'auto' && '(备选 2)'}
+                          ☁️ 通义千问 {llmProvider === 'auto' && '(备选 3)'}
                         </label>
                         <div className="flex items-center gap-2">
                           {qwenKey && <span className="text-[10px] text-green-600 font-bold">已配置</span>}

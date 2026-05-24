@@ -442,8 +442,8 @@ function AppContent() {
   };
 
   const getLLMConfig = (): LLMConfig | null => {
-    if (!geminiKey && !doubaoKey && !qwenKey) {
-      setError("请至少在设置中配置一个模型的 API Key (Gemini, 豆包 或 千问)");
+    if (llmProvider !== 'auto' && llmProvider !== 'openai' && !geminiKey && !doubaoKey && !qwenKey) {
+      setError("请至少在设置中配置一个模型的 API Key，或切换到 OpenAI 后端模式并在 Netlify 配置 OPENAI_API_KEY");
       setShowSettings(true);
       return null;
     }
@@ -456,9 +456,9 @@ function AppContent() {
 
     return {
       provider: llmProvider,
-      apiKey: llmProvider === 'gemini' ? geminiKey : (llmProvider === 'doubao' ? doubaoKey : qwenKey),
+      apiKey: llmProvider === 'gemini' ? geminiKey : (llmProvider === 'doubao' ? doubaoKey : (llmProvider === 'qwen' ? qwenKey : '')),
       baseURL: llmProvider === 'doubao' ? doubaoEndpoint : (llmProvider === 'qwen' ? 'https://dashscope.aliyuncs.com/compatible-mode/v1' : undefined),
-      model: llmProvider === 'doubao' ? doubaoVisionModel : (llmProvider === 'qwen' ? 'qwen-vl-max' : 'models/gemini-2.5-flash'),
+      model: llmProvider === 'doubao' ? doubaoVisionModel : (llmProvider === 'qwen' ? 'qwen-vl-max' : (llmProvider === 'openai' ? 'openai-serverless' : 'models/gemini-2.5-flash')),
       geminiKey: geminiKey,
       doubaoKey: doubaoKey,
       doubaoEndpoint: doubaoEndpoint,
@@ -669,9 +669,9 @@ function AppContent() {
     try {
       const llmConfig: LLMConfig = {
         provider: llmProvider,
-        apiKey: llmProvider === 'gemini' ? geminiKey : (llmProvider === 'doubao' ? doubaoKey : qwenKey),
+        apiKey: llmProvider === 'gemini' ? geminiKey : (llmProvider === 'doubao' ? doubaoKey : (llmProvider === 'qwen' ? qwenKey : '')),
         baseURL: llmProvider === 'doubao' ? doubaoEndpoint : (llmProvider === 'qwen' ? 'https://dashscope.aliyuncs.com/compatible-mode/v1' : undefined),
-        model: llmProvider === 'doubao' ? doubaoVisionModel : (llmProvider === 'qwen' ? 'qwen-vl-max' : 'models/gemini-2.5-flash'),
+        model: llmProvider === 'doubao' ? doubaoVisionModel : (llmProvider === 'qwen' ? 'qwen-vl-max' : (llmProvider === 'openai' ? 'openai-serverless' : 'models/gemini-2.5-flash')),
         geminiKey: geminiKey,
         doubaoKey: doubaoKey,
         doubaoEndpoint: doubaoEndpoint,
@@ -881,7 +881,7 @@ function AppContent() {
                   <div className="flex items-center gap-1.5">
                     <div className={cn("w-1.5 h-1.5 rounded-full", isExtracting ? "bg-green-500 animate-pulse" : "bg-blue-500")} />
                     <span className="text-xs font-black text-gray-700">
-                      {currentAttemptingModel || (llmProvider === 'auto' ? '智能轮询 (待命)' : (llmProvider === 'gemini' ? 'Gemini 1.5' : llmProvider === 'doubao' ? '豆包 Pro' : '千问 Max'))}
+                      {currentAttemptingModel || (llmProvider === 'auto' ? '智能轮询 (待命)' : (llmProvider === 'gemini' ? 'Gemini 2.5' : llmProvider === 'openai' ? 'OpenAI 后端' : llmProvider === 'doubao' ? '豆包 Pro' : '千问 Max'))}
                     </span>
                   </div>
                 </div>
