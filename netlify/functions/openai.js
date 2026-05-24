@@ -42,7 +42,7 @@ export async function handler(event) {
   if (event.httpMethod !== "POST") return json(405, { error: "Method not allowed" });
 
   try {
-    const { action, imageBase64, prompt, model: requestedModel, baseURL: requestedBaseURL } = JSON.parse(event.body || "{}");
+    const { action, imageBase64, prompt, model: requestedModel } = JSON.parse(event.body || "{}");
     const authHeader = event.headers.authorization || event.headers.Authorization || "";
     const bearerToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : "";
     const apiKey = bearerToken || process.env.OPENROUTER_API_KEY;
@@ -51,7 +51,7 @@ export async function handler(event) {
       return json(500, { error: "请在系统设置中填写 OpenRouter API Key" });
     }
 
-    const baseURL = requestedBaseURL || process.env.OPENROUTER_BASE_URL || "https://openrouter.ai/api/v1";
+    const baseURL = "https://openrouter.ai/api/v1";
     const model = requestedModel || process.env.OPENROUTER_MODEL || "openai/gpt-4.1-mini";
     const client = new OpenAI({
       apiKey,

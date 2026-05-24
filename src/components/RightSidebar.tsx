@@ -200,7 +200,7 @@ export function RightSidebar({
             {isOpen && (
               <div className="overflow-hidden">
                 <p className="text-xs font-bold text-gray-900 truncate">Fashion AI v2.0</p>
-                <p className="text-[10px] text-gray-500 truncate">Powered by Gemini</p>
+                <p className="text-[10px] text-gray-500 truncate">Powered by OpenRouter</p>
               </div>
             )}
           </div>

@@ -3,29 +3,13 @@ import { useState, useRef, useMemo, useEffect } from 'react';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 import { 
-  Upload, 
-  FileText, 
-  Image as ImageIcon, 
   Download, 
-  CheckCircle2, 
   AlertCircle,
-  Loader2,
-  Plus,
-  Trash2,
-  ChevronRight,
-  ChevronDown,
-  Settings,
-  Key,
-  Globe,
   X,
-  Sparkles,
-  Copy,
-  Check,
-  Eye,
-  EyeOff
+  Sparkles
 } from 'lucide-react';
 import { cn } from './lib/utils';
-import { extractAttributesOnly, generateTitlesOnly, generateProductNamesOnly, generateEverything, AttributeDefinition, LLMProvider, LLMConfig } from './services/llmService';
+import { extractAttributesOnly, generateTitlesOnly, generateProductNamesOnly, AttributeDefinition, LLMConfig } from './services/llmService';
 import { DEFAULT_PROMPTS } from './services/prompts';
 
 import { SettingsModal } from './components/SettingsModal';
@@ -154,45 +138,35 @@ function AppContent() {
   const [extractionStage, setExtractionStage] = useState<'idle' | 'extracting' | 'success'>('idle');
   const [error, setError] = useState<string | null>(null);
   
-  // LLM Configuration
-  const [llmProvider, setLlmProvider] = useState<LLMProvider>(() => (localStorage.getItem('llm_provider') as LLMProvider) || 'auto');
-  const [geminiKey, setGeminiKey] = useState(() => localStorage.getItem('gemini_key') || import.meta.env.VITE_GEMINI_API_KEY || '');
-  const [openaiKey, setOpenaiKey] = useState(() => localStorage.getItem('openrouter_key') || localStorage.getItem('openai_key') || '');
-  const [openaiModel, setOpenaiModel] = useState(() => localStorage.getItem('openrouter_model') || localStorage.getItem('openai_model') || 'openai/gpt-4.1-mini');
-  const [openrouterBaseURL, setOpenrouterBaseURL] = useState(() => localStorage.getItem('openrouter_base_url') || 'https://openrouter.ai/api/v1');
-  const [qwenKey, setQwenKey] = useState(() => localStorage.getItem('qwen_key') || import.meta.env.VITE_QWEN_API_KEY || '');
-  const [doubaoKey, setDoubaoKey] = useState(() => localStorage.getItem('doubao_key') || import.meta.env.VITE_DOUBAO_API_KEY || '');
-  const [doubaoEndpoint, setDoubaoEndpoint] = useState(() => localStorage.getItem('doubao_endpoint') || import.meta.env.VITE_DOUBAO_ENDPOINT || '');
-  const [doubaoVisionModel, setDoubaoVisionModel] = useState(() => localStorage.getItem('doubao_vision_model') || import.meta.env.VITE_DOUBAO_VISION_MODEL || 'doubao-vision-pro');
-  const [doubaoTextModel, setDoubaoTextModel] = useState(() => localStorage.getItem('doubao_text_model') || import.meta.env.VITE_DOUBAO_TEXT_MODEL || 'doubao-pro-32k');
+  // OpenRouter configuration
+  const [openrouterKey, setOpenrouterKey] = useState(() => localStorage.getItem('openrouter_key') || localStorage.getItem('openai_key') || '');
+  const [openrouterModel, setOpenrouterModel] = useState(() => localStorage.getItem('openrouter_model') || localStorage.getItem('openai_model') || 'openai/gpt-4.1-mini');
   const [minTitleLen, setMinTitleLen] = useState<number>(() => Number(localStorage.getItem('fashion_min_title_len')) || 28);
   const [maxTitleLen, setMaxTitleLen] = useState<number>(() => Number(localStorage.getItem('fashion_max_title_len')) || 30);
   const [showSettings, setShowSettings] = useState(false);
   
-  const [showGeminiKey, setShowGeminiKey] = useState(false);
-  const [showOpenaiKey, setShowOpenaiKey] = useState(false);
-  const [showDoubaoKey, setShowDoubaoKey] = useState(false);
-  const [showQwenKey, setShowQwenKey] = useState(false);
+  const [showOpenrouterKey, setShowOpenrouterKey] = useState(false);
   const [customPrompts, setCustomPrompts] = useState(() => {
     const saved = localStorage.getItem('fashion_custom_prompts');
     if (saved) {
-      const parsed = JSON.parse(saved);
-      // Clean up old categories if they exist
-      delete parsed.extract;
-      delete parsed.refine;
-      
-      // Ensure new prompt types are merged in
-      return {
-        ...DEFAULT_PROMPTS,
-        ...parsed,
-        // Also deep merge within categories to handle newly added providers if any
-        naming: { ...DEFAULT_PROMPTS.naming, ...parsed.naming },
-        attributesOnly: { ...DEFAULT_PROMPTS.attributesOnly, ...parsed.attributesOnly },
-        titleOnly: { ...DEFAULT_PROMPTS.titleOnly, ...parsed.titleOnly },
-        allInOne: { ...DEFAULT_PROMPTS.allInOne, ...parsed.allInOne }
-      };
+      try {
+        const parsed = JSON.parse(saved);
+        const migratePrompt = (key: keyof typeof DEFAULT_PROMPTS) => {
+          const value = parsed?.[key];
+          if (typeof value === 'string') return value;
+          return DEFAULT_PROMPTS[key];
+        };
+
+        return {
+          attributesOnly: migratePrompt('attributesOnly'),
+          titleOnly: migratePrompt('titleOnly'),
+          naming: migratePrompt('naming')
+        };
+      } catch {
+        return { ...DEFAULT_PROMPTS };
+      }
     }
-    return DEFAULT_PROMPTS;
+    return { ...DEFAULT_PROMPTS };
   });
 
   useEffect(() => {
@@ -208,36 +182,11 @@ function AppContent() {
   });
 
   useEffect(() => {
-    localStorage.setItem('llm_provider', llmProvider);
-  }, [llmProvider]);
-
+    localStorage.setItem('openrouter_key', openrouterKey);
+  }, [openrouterKey]);
   useEffect(() => {
-    localStorage.setItem('gemini_key', geminiKey);
-  }, [geminiKey]);
-  useEffect(() => {
-    localStorage.setItem('openrouter_key', openaiKey);
-  }, [openaiKey]);
-  useEffect(() => {
-    localStorage.setItem('openrouter_model', openaiModel);
-  }, [openaiModel]);
-  useEffect(() => {
-    localStorage.setItem('openrouter_base_url', openrouterBaseURL);
-  }, [openrouterBaseURL]);
-  useEffect(() => {
-    localStorage.setItem('qwen_key', qwenKey);
-  }, [qwenKey]);
-  useEffect(() => {
-    localStorage.setItem('doubao_key', doubaoKey);
-  }, [doubaoKey]);
-  useEffect(() => {
-    localStorage.setItem('doubao_endpoint', doubaoEndpoint);
-  }, [doubaoEndpoint]);
-  useEffect(() => {
-    localStorage.setItem('doubao_vision_model', doubaoVisionModel);
-  }, [doubaoVisionModel]);
-  useEffect(() => {
-    localStorage.setItem('doubao_text_model', doubaoTextModel);
-  }, [doubaoTextModel]);
+    localStorage.setItem('openrouter_model', openrouterModel);
+  }, [openrouterModel]);
 
   useEffect(() => {
     localStorage.setItem('fashion_generated_product_name', generatedProductName);
@@ -455,34 +404,18 @@ function AppContent() {
   };
 
   const getLLMConfig = (): LLMConfig | null => {
-    if (llmProvider !== 'auto' && llmProvider !== 'openai' && !geminiKey && !doubaoKey && !qwenKey) {
-      setError("请至少在设置中配置一个模型的 API Key，或切换到 OpenRouter 并填写 OpenRouter API Key");
-      setShowSettings(true);
-      return null;
-    }
-
-    if (llmProvider === 'doubao' && (!doubaoVisionModel || !doubaoTextModel)) {
-      setError("豆包 API 需要配置‘视觉模型 ID’和‘文本模型 ID’（推理接入点 ID）。请在设置中填写以 ep- 开头的 ID。");
+    if (!openrouterKey) {
+      setError("请在系统设置中填写 OpenRouter API Key");
       setShowSettings(true);
       return null;
     }
 
     return {
-      provider: llmProvider,
-      apiKey: llmProvider === 'gemini' ? geminiKey : (llmProvider === 'doubao' ? doubaoKey : (llmProvider === 'qwen' ? qwenKey : '')),
-      baseURL: llmProvider === 'doubao' ? doubaoEndpoint : (llmProvider === 'qwen' ? 'https://dashscope.aliyuncs.com/compatible-mode/v1' : undefined),
-      model: llmProvider === 'doubao' ? doubaoVisionModel : (llmProvider === 'qwen' ? 'qwen-vl-max' : (llmProvider === 'openai' ? 'openrouter-serverless' : 'models/gemini-2.5-flash')),
-      geminiKey: geminiKey,
-      openaiKey: openaiKey,
-      openaiModel: openaiModel,
-      openrouterKey: openaiKey,
-      openrouterModel: openaiModel,
-      openrouterBaseURL: openrouterBaseURL,
-      doubaoKey: doubaoKey,
-      doubaoEndpoint: doubaoEndpoint,
-      qwenKey: qwenKey,
-      doubaoVisionModel: doubaoVisionModel,
-      doubaoTextModel: doubaoTextModel,
+      provider: 'openai',
+      apiKey: '',
+      model: openrouterModel,
+      openrouterKey,
+      openrouterModel,
       onWarning: (msg) => setWarnings(prev => prev.includes(msg) ? prev : [...prev, msg]),
       onModelChange: (model) => setCurrentAttemptingModel(model),
       customPrompts
@@ -587,55 +520,14 @@ function AppContent() {
     }
   };
 
-  const handleGenerateAll = async () => {
-    if (!image || !selectedCategory) return;
-    const llmConfig = getLLMConfig();
-    if (!llmConfig) return;
-
-    setWarnings([]);
-    setIsExtracting(true);
-    setExtractionStage('extracting');
-    setError(null);
-    setCurrentAttemptingModel('');
-
-    try {
-      const currentHotKeywords = categoryKeywords[selectedCategory] || '';
-      
-      const result = await generateEverything(
-        image,
-        selectedCategory,
-        extractedData,
-        currentHotKeywords,
-        llmConfig,
-        [minTitleLen, maxTitleLen],
-        namingFeedback
-      );
-
-      setGeneratedTitle(result.title);
-      setGeneratedSubtitle(result.subtitle);
-      setGeneratedProductNames(result.productNames);
-      if (result.productNames.length > 0) setGeneratedProductName(result.productNames[0]);
-      
-      setExtractionStage('success');
-      setTimeout(() => setExtractionStage('idle'), 2000);
-    } catch (err: any) {
-      handleLLMError(err);
-    } finally {
-      setIsExtracting(false);
-    }
-  };
-
   const handleLLMError = (err: any) => {
     const errorMessage = err?.message || "";
     const errorStatus = err?.status || err?.error?.status || err?.code || err?.error?.code;
     
     if (errorMessage.includes('429') || errorMessage.includes('RESOURCE_EXHAUSTED') || errorStatus === 429 || errorStatus === 'RESOURCE_EXHAUSTED') {
       setError("AI 接口调用次数超限 (Rate Limit Exceeded)。请稍等几秒钟后再试，或者检查您的 API 配额。");
-    } else if (errorMessage.includes('ChatCompletionRequestMultiContent can only support text')) {
-      setError("模型配置错误：您提供的“视觉模型 ID”不支持图片分析。请确保在火山引擎控制台选择了支持 Vision 的模型（如 doubao-vision-pro）并创建了对应的推理接入点。");
-      setShowSettings(true);
-    } else if (llmProvider === 'doubao' && (errorMessage.includes('404') || errorStatus === 404)) {
-      setError("模型配置错误：找不到指定的推理接入点。请检查您的“视觉模型 ID”和“文本模型 ID”是否正确，且必须以 ep- 开头。");
+    } else if (errorMessage.includes('API Key') || errorMessage.includes('OpenRouter API Key')) {
+      setError(errorMessage);
       setShowSettings(true);
     } else {
       setError(errorMessage || "AI 调用失败。请检查网络连接或重试。");
@@ -685,27 +577,8 @@ function AppContent() {
     
     setCurrentAttemptingModel('');
     try {
-      const llmConfig: LLMConfig = {
-        provider: llmProvider,
-        apiKey: llmProvider === 'gemini' ? geminiKey : (llmProvider === 'doubao' ? doubaoKey : (llmProvider === 'qwen' ? qwenKey : '')),
-        baseURL: llmProvider === 'doubao' ? doubaoEndpoint : (llmProvider === 'qwen' ? 'https://dashscope.aliyuncs.com/compatible-mode/v1' : undefined),
-        model: llmProvider === 'doubao' ? doubaoVisionModel : (llmProvider === 'qwen' ? 'qwen-vl-max' : (llmProvider === 'openai' ? 'openrouter-serverless' : 'models/gemini-2.5-flash')),
-        geminiKey: geminiKey,
-        openaiKey: openaiKey,
-        openaiModel: openaiModel,
-        openrouterKey: openaiKey,
-        openrouterModel: openaiModel,
-        openrouterBaseURL: openrouterBaseURL,
-        doubaoKey: doubaoKey,
-        doubaoEndpoint: doubaoEndpoint,
-        qwenKey: qwenKey,
-        doubaoVisionModel: doubaoVisionModel,
-        doubaoTextModel: doubaoTextModel,
-        onWarning: (msg) => setWarnings(prev => prev.includes(msg) ? prev : [...prev, msg]),
-        onModelChange: (model) => setCurrentAttemptingModel(model),
-        customPrompts
-      };
-
+      const llmConfig = getLLMConfig();
+      if (!llmConfig) return;
       const names = await generateProductNamesOnly(image, selectedCategory, llmConfig, namingFeedback);
       setGeneratedProductNames(names);
       if (names.length > 0) {
@@ -904,7 +777,7 @@ function AppContent() {
                   <div className="flex items-center gap-1.5">
                     <div className={cn("w-1.5 h-1.5 rounded-full", isExtracting ? "bg-green-500 animate-pulse" : "bg-blue-500")} />
                     <span className="text-xs font-black text-gray-700">
-                      {currentAttemptingModel || (llmProvider === 'auto' ? '智能轮询 (待命)' : (llmProvider === 'gemini' ? 'Gemini 2.5' : llmProvider === 'openai' ? 'OpenRouter' : llmProvider === 'doubao' ? '豆包 Pro' : '千问 Max'))}
+                      {currentAttemptingModel || `OpenRouter ${openrouterModel}`}
                     </span>
                   </div>
                 </div>
@@ -975,7 +848,8 @@ function AppContent() {
                 isExtracting={isExtracting}
                 image={image}
                 handleExtractAttributes={handleExtractAttributes}
-                handleGenerateAll={handleGenerateAll}
+                handleGenerateTitles={handleGenerateTitles}
+                handleGenerateNames={handleGenerateNames}
                 extractionStage={extractionStage}
                 currentAttemptingModel={currentAttemptingModel}
               />
@@ -1041,34 +915,12 @@ function AppContent() {
       <SettingsModal 
         showSettings={showSettings}
         setShowSettings={setShowSettings}
-        llmProvider={llmProvider}
-        setLlmProvider={setLlmProvider}
-        geminiKey={geminiKey}
-        setGeminiKey={setGeminiKey}
-        showGeminiKey={showGeminiKey}
-        setShowGeminiKey={setShowGeminiKey}
-        openaiKey={openaiKey}
-        setOpenaiKey={setOpenaiKey}
-        openaiModel={openaiModel}
-        setOpenaiModel={setOpenaiModel}
-        openrouterBaseURL={openrouterBaseURL}
-        setOpenrouterBaseURL={setOpenrouterBaseURL}
-        showOpenaiKey={showOpenaiKey}
-        setShowOpenaiKey={setShowOpenaiKey}
-        doubaoKey={doubaoKey}
-        setDoubaoKey={setDoubaoKey}
-        showDoubaoKey={showDoubaoKey}
-        setShowDoubaoKey={setShowDoubaoKey}
-        doubaoVisionModel={doubaoVisionModel}
-        setDoubaoVisionModel={setDoubaoVisionModel}
-        doubaoTextModel={doubaoTextModel}
-        setDoubaoTextModel={setDoubaoTextModel}
-        doubaoEndpoint={doubaoEndpoint}
-        setDoubaoEndpoint={setDoubaoEndpoint}
-        qwenKey={qwenKey}
-        setQwenKey={setQwenKey}
-        showQwenKey={showQwenKey}
-        setShowQwenKey={setShowQwenKey}
+        openrouterKey={openrouterKey}
+        setOpenrouterKey={setOpenrouterKey}
+        openrouterModel={openrouterModel}
+        setOpenrouterModel={setOpenrouterModel}
+        showOpenrouterKey={showOpenrouterKey}
+        setShowOpenrouterKey={setShowOpenrouterKey}
         customPrompts={customPrompts}
         setCustomPrompts={setCustomPrompts}
       />

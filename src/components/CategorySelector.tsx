@@ -13,7 +13,8 @@ interface CategorySelectorProps {
   isExtracting: boolean;
   image: string | null;
   handleExtractAttributes: () => void;
-  handleGenerateAll: () => void;
+  handleGenerateTitles: () => void;
+  handleGenerateNames: () => void;
   extractionStage: 'idle' | 'extracting' | 'success';
   currentAttemptingModel: string | null;
 }
@@ -28,7 +29,8 @@ export function CategorySelector({
   isExtracting,
   image,
   handleExtractAttributes,
-  handleGenerateAll,
+  handleGenerateTitles,
+  handleGenerateNames,
   extractionStage,
   currentAttemptingModel
 }: CategorySelectorProps) {
@@ -85,7 +87,7 @@ export function CategorySelector({
             disabled={!image || !selectedCategory || isExtracting}
             onClick={handleExtractAttributes}
             className={cn(
-              "sm:w-1/3 py-4 rounded-xl font-bold flex items-center justify-center gap-2 transition-all shadow-sm text-sm",
+              "sm:flex-1 py-4 rounded-xl font-bold flex items-center justify-center gap-2 transition-all shadow-sm text-sm",
               !image || !selectedCategory || isExtracting
                 ? "bg-gray-100 text-gray-400 cursor-not-allowed"
                 : "bg-blue-600 text-white hover:bg-blue-700 active:scale-[0.98] shadow-blue-100"
@@ -101,12 +103,12 @@ export function CategorySelector({
 
           <button
             disabled={!image || !selectedCategory || isExtracting}
-            onClick={handleGenerateAll}
+            onClick={handleGenerateTitles}
             className={cn(
-              "sm:flex-1 py-4 rounded-xl font-bold flex items-center justify-center gap-2 transition-all shadow-lg text-sm",
+              "sm:flex-1 py-4 rounded-xl font-bold flex items-center justify-center gap-2 transition-all shadow-sm text-sm",
               !image || !selectedCategory || isExtracting
-                ? "bg-gray-100 text-gray-400 cursor-not-allowed shadow-none"
-                : "bg-gradient-to-r from-indigo-600 to-purple-600 text-white hover:from-indigo-700 hover:to-purple-700 active:scale-[0.98] shadow-indigo-100"
+                ? "bg-gray-100 text-gray-400 cursor-not-allowed"
+                : "bg-indigo-600 text-white hover:bg-indigo-700 active:scale-[0.98] shadow-indigo-100"
             )}
           >
             {isExtracting && extractionStage === 'extracting' ? (
@@ -114,7 +116,25 @@ export function CategorySelector({
             ) : (
               <Sparkles size={16} />
             )}
-            一键生成 (标题+品名)
+            标题生成
+          </button>
+
+          <button
+            disabled={!image || !selectedCategory || isExtracting}
+            onClick={handleGenerateNames}
+            className={cn(
+              "sm:flex-1 py-4 rounded-xl font-bold flex items-center justify-center gap-2 transition-all shadow-sm text-sm",
+              !image || !selectedCategory || isExtracting
+                ? "bg-gray-100 text-gray-400 cursor-not-allowed"
+                : "bg-purple-600 text-white hover:bg-purple-700 active:scale-[0.98] shadow-purple-100"
+            )}
+          >
+            {isExtracting && extractionStage === 'extracting' ? (
+              <Loader2 className="animate-spin" size={16} />
+            ) : (
+              <Sparkles size={16} />
+            )}
+            商品起名
           </button>
         </div>
 
