@@ -1,0 +1,5 @@
+{
+  "name": "Plus Size Fashion Attribute Extractor",
+  "description": "AI-powered tool to extract clothing attributes from images based on custom CSV definitions for plus-size women's fashion.",
+  "requestFramePermissions": []
+}
