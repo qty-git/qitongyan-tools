@@ -22,7 +22,7 @@ export async function handler(event) {
   if (event.httpMethod !== "POST") return json(405, { error: "Method not allowed" });
 
   if (!process.env.OPENAI_API_KEY) {
-    return json(500, { error: "Netlify 环境变量 OPENAI_API_KEY 未配置" });
+    return json(500, { error: "请在 Netlify Environment Variables 中配置 OPENAI_API_KEY" });
   }
 
   try {
