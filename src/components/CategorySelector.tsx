@@ -3,14 +3,14 @@ import { AlertCircle, Loader2, CheckCircle2, Sparkles, Wand2 } from 'lucide-reac
 import { cn } from '../lib/utils';
 import { ParsedCSVRow } from '../types';
 import {
-  DEFAULT_FEATURE_MODELS,
   FEATURE_LABELS,
   FEATURE_ORDER,
   FeatureKey,
+  ModelRegistryOption,
   formatModelOption,
-  getEnabledModelGroupsForFeature,
+  getModelGroupsForFeature,
   getModelById
-} from '../data/openrouterModels';
+} from '../services/modelRegistryBuilder';
 
 interface CategorySelectorProps {
   selectedCategory: string;
@@ -25,6 +25,9 @@ interface CategorySelectorProps {
   setSelectedTasks: React.Dispatch<React.SetStateAction<Record<FeatureKey, boolean>>>;
   featureModels: Record<FeatureKey, string>;
   setFeatureModels: React.Dispatch<React.SetStateAction<Record<FeatureKey, string>>>;
+  modelRegistry: ModelRegistryOption[];
+  modelRegistryLoading: boolean;
+  modelRegistryTesting: boolean;
   handleExtractAttributes: () => void;
   handleGenerateTitles: () => void;
   handleGenerateNames: () => void;
@@ -48,6 +51,9 @@ export function CategorySelector({
   setSelectedTasks,
   featureModels,
   setFeatureModels,
+  modelRegistry,
+  modelRegistryLoading,
+  modelRegistryTesting,
   handleExtractAttributes,
   handleGenerateTitles,
   handleGenerateNames,
@@ -77,7 +83,12 @@ export function CategorySelector({
   };
 
   const useRecommendedModels = () => {
-    setFeatureModels({ ...DEFAULT_FEATURE_MODELS });
+    const recommended = FEATURE_ORDER.reduce((acc, feature) => {
+      const model = getModelGroupsForFeature(modelRegistry, feature)[0]?.models[0];
+      acc[feature] = model?.modelId || featureModels[feature] || '';
+      return acc;
+    }, {} as Record<FeatureKey, string>);
+    setFeatureModels(recommended);
   };
 
   const quickActions: Array<{ feature: FeatureKey; label: string; onClick: () => void; color: string }> = [
@@ -141,10 +152,11 @@ export function CategorySelector({
               <button
                 type="button"
                 onClick={useRecommendedModels}
+                disabled={modelRegistry.length === 0}
                 className="px-3 py-1.5 rounded-lg bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors text-xs font-black flex items-center gap-1.5"
               >
                 <Wand2 size={13} />
-                推荐模型
+                {modelRegistryTesting ? '测试中' : '推荐模型'}
               </button>
               <label className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-gray-50 border border-gray-100 text-xs font-black text-gray-700 cursor-pointer">
                 <input
@@ -160,7 +172,7 @@ export function CategorySelector({
 
           <div className="space-y-3">
             {FEATURE_ORDER.map(feature => {
-              const selectedModel = getModelById(featureModels[feature]);
+              const selectedModel = getModelById(modelRegistry, featureModels[feature]);
               const status = taskStatus[feature];
               return (
                 <div
@@ -182,7 +194,7 @@ export function CategorySelector({
                         <div className="min-w-0">
                           <div className="text-sm font-black text-gray-900">{FEATURE_LABELS[feature]}</div>
                           <div className="text-[11px] text-gray-500 truncate">
-                            {selectedModel ? formatModelOption(selectedModel) : featureModels[feature]}
+                            {selectedModel ? formatModelOption(selectedModel) : featureModels[feature] || '等待模型注册表'}
                           </div>
                         </div>
                         <div className="flex items-center gap-1.5 shrink-0">
@@ -205,7 +217,7 @@ export function CategorySelector({
                         disabled={isExtracting}
                         className="w-full p-2.5 bg-white border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-xs font-bold disabled:opacity-60"
                       >
-                        {getEnabledModelGroupsForFeature(feature).map(group => (
+                        {getModelGroupsForFeature(modelRegistry, feature).map(group => (
                           <optgroup key={`${feature}-${group.provider}`} label={group.label}>
                             {group.models.map(model => (
                               <option key={`${feature}-${model.modelId}`} value={model.modelId}>
@@ -215,6 +227,9 @@ export function CategorySelector({
                           </optgroup>
                         ))}
                       </select>
+                      {modelRegistryLoading && (
+                        <p className="text-xs text-gray-400 font-medium">正在刷新 OpenRouter 模型生态...</p>
+                      )}
                       {taskErrors[feature] && (
                         <p className="text-xs text-red-600 font-medium">{FEATURE_LABELS[feature]}失败：{taskErrors[feature]}</p>
                       )}

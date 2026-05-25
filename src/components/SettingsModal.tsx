@@ -4,14 +4,14 @@ import { cn } from '../lib/utils';
 import { DEFAULT_PROMPTS, PromptType } from '../services/prompts';
 import { testModelConnection } from '../services/llmService';
 import {
-  DEFAULT_FEATURE_MODELS,
   FEATURE_LABELS,
   FEATURE_ORDER,
   FeatureKey,
+  ModelRegistryOption,
   formatModelOption,
-  getEnabledModelGroupsForFeature,
+  getModelGroupsForFeature,
   getModelById
-} from '../data/openrouterModels';
+} from '../services/modelRegistryBuilder';
 
 interface SettingsModalProps {
   showSettings: boolean;
@@ -20,6 +20,15 @@ interface SettingsModalProps {
   setOpenrouterKey: (key: string) => void;
   featureModels: Record<FeatureKey, string>;
   setFeatureModels: React.Dispatch<React.SetStateAction<Record<FeatureKey, string>>>;
+  modelRegistry: ModelRegistryOption[];
+  modelRegistryLoading: boolean;
+  modelRegistryTesting: boolean;
+  modelRegistryError: string | null;
+  modelRegistryFetchedAt: number | null;
+  refreshModelRegistry: () => Promise<void>;
+  testRecommendedModels: () => Promise<void>;
+  advancedModelMode: boolean;
+  setAdvancedModelMode: (enabled: boolean) => void;
   showOpenrouterKey: boolean;
   setShowOpenrouterKey: (show: boolean) => void;
   customPrompts: Partial<Record<PromptType, string>>;
@@ -41,6 +50,15 @@ export function SettingsModal({
   setOpenrouterKey,
   featureModels,
   setFeatureModels,
+  modelRegistry,
+  modelRegistryLoading,
+  modelRegistryTesting,
+  modelRegistryError,
+  modelRegistryFetchedAt,
+  refreshModelRegistry,
+  testRecommendedModels,
+  advancedModelMode,
+  setAdvancedModelMode,
   showOpenrouterKey,
   setShowOpenrouterKey,
   customPrompts,
@@ -91,7 +109,12 @@ export function SettingsModal({
   };
 
   const useRecommendedModels = () => {
-    setFeatureModels({ ...DEFAULT_FEATURE_MODELS });
+    const recommended = FEATURE_ORDER.reduce((acc, feature) => {
+      const model = getModelGroupsForFeature(modelRegistry, feature)[0]?.models[0];
+      acc[feature] = model?.modelId || featureModels[feature] || '';
+      return acc;
+    }, {} as Record<FeatureKey, string>);
+    setFeatureModels(recommended);
   };
 
   const setFeatureModel = (feature: FeatureKey, modelId: string) => {
@@ -177,19 +200,57 @@ export function SettingsModal({
 
               <div className="space-y-3">
                 <div className="flex items-center justify-between gap-3">
-                  <label className="text-xs font-black text-gray-400 uppercase tracking-wider">独立模型选择</label>
-                  <button
-                    type="button"
-                    onClick={useRecommendedModels}
-                    className="px-3 py-1.5 rounded-lg bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors text-xs font-black"
-                  >
-                    一键使用推荐模型
-                  </button>
+                  <div>
+                    <label className="text-xs font-black text-gray-400 uppercase tracking-wider">动态模型生态</label>
+                    <p className="text-[11px] text-gray-500 mt-1">
+                      {modelRegistryFetchedAt ? `已缓存 ${modelRegistry.length} 个 OpenRouter 模型` : '启动后自动拉取 OpenRouter 模型'}
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={refreshModelRegistry}
+                      disabled={modelRegistryLoading}
+                      className="px-3 py-1.5 rounded-lg bg-gray-100 text-gray-700 hover:bg-gray-200 transition-colors text-xs font-black disabled:opacity-50"
+                    >
+                      {modelRegistryLoading ? '刷新中...' : '刷新模型'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={testRecommendedModels}
+                      disabled={!openrouterKey || modelRegistryTesting || modelRegistry.length === 0}
+                      className="px-3 py-1.5 rounded-lg bg-green-50 text-green-700 hover:bg-green-100 transition-colors text-xs font-black disabled:opacity-50"
+                    >
+                      {modelRegistryTesting ? '测试中...' : '自动测试'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={useRecommendedModels}
+                      disabled={modelRegistry.length === 0}
+                      className="px-3 py-1.5 rounded-lg bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors text-xs font-black disabled:opacity-50"
+                    >
+                      一键推荐
+                    </button>
+                  </div>
                 </div>
+                {modelRegistryError && (
+                  <div className="p-3 rounded-xl bg-red-50 border border-red-100 text-sm text-red-700 font-medium">
+                    {modelRegistryError}
+                  </div>
+                )}
+                <label className="flex items-center gap-2 p-3 rounded-xl bg-gray-50 border border-gray-100 text-sm font-bold text-gray-700">
+                  <input
+                    type="checkbox"
+                    checked={advancedModelMode}
+                    onChange={(e) => setAdvancedModelMode(e.target.checked)}
+                    className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  高级模式：允许手动输入任意 OpenRouter model id
+                </label>
 
                 <div className="grid grid-cols-1 gap-3">
                   {FEATURE_ORDER.map(feature => {
-                    const selectedModel = getModelById(featureModels[feature]);
+                    const selectedModel = getModelById(modelRegistry, featureModels[feature]);
                     return (
                       <div key={feature} className="p-4 rounded-xl border border-gray-100 bg-gray-50 space-y-2">
                         <div className="flex items-start justify-between gap-3">
@@ -213,7 +274,7 @@ export function SettingsModal({
                           onChange={(e) => setFeatureModel(feature, e.target.value)}
                           className="w-full p-3 bg-white border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-sm font-bold"
                         >
-                          {getEnabledModelGroupsForFeature(feature).map(group => (
+                          {getModelGroupsForFeature(modelRegistry, feature).map(group => (
                             <optgroup key={`${feature}-${group.provider}`} label={group.label}>
                               {group.models.map(model => (
                                 <option key={`${feature}-${model.modelId}`} value={model.modelId}>
@@ -223,8 +284,23 @@ export function SettingsModal({
                             </optgroup>
                           ))}
                         </select>
+                        {advancedModelMode && (
+                          <input
+                            value={featureModels[feature]}
+                            onChange={(e) => setFeatureModel(feature, e.target.value.trim())}
+                            placeholder="手动输入 OpenRouter model id"
+                            className="w-full p-3 bg-white border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-sm font-mono"
+                          />
+                        )}
                         {selectedModel && (
-                          <p className="text-[11px] text-gray-400 font-mono truncate">{selectedModel.modelId}</p>
+                          <div className="space-y-1">
+                            <p className="text-[11px] text-gray-400 font-mono truncate">{selectedModel.modelId}</p>
+                            <p className="text-[11px] text-gray-500">
+                              上下文 {selectedModel.contextLength ? Math.round(selectedModel.contextLength / 1000) + 'K' : '未知'} ｜ 输入价 {selectedModel.promptPrice} ｜ 输出价 {selectedModel.completionPrice} ｜ {selectedModel.isFree ? '免费' : '付费'} ｜ {selectedModel.testStatus === 'success' ? '测试成功' : selectedModel.testStatus === 'failed' ? `不可用：${selectedModel.unavailableReason}` : '未测试'}
+                            </p>
+                            <p className="text-[11px] text-blue-600 font-medium">{selectedModel.recommendedFor.slice(0, 5).join('、')}</p>
+                            <p className="text-[11px] text-gray-500">{selectedModel.tags.slice(0, 8).join('、')}</p>
+                          </div>
                         )}
                       </div>
                     );

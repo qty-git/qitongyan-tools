@@ -39,7 +39,20 @@ function replacePlaceholders(template: string, data: Record<string, unknown>): s
 }
 
 const getPrompt = (type: PromptType, config: LLMConfig) => {
-  return config.customPrompts?.[type] || DEFAULT_PROMPTS[type];
+  const basePrompt = config.customPrompts?.[type] || DEFAULT_PROMPTS[type];
+  return `${basePrompt}\n\n${getModelAdapterHint(config.openrouterModel || config.model || '')}`.trim();
+};
+
+const getModelAdapterHint = (modelId: string) => {
+  const id = modelId.toLowerCase();
+  const shared = '模型适配：严格遵守当前任务模板，只输出合法 JSON，不要输出解释、Markdown 或额外字段。';
+  if (/gemini|gemma/.test(id)) return `${shared}\n图片理解时优先描述可见细节，避免把不可见信息当作事实。`;
+  if (/gpt|openai|claude|anthropic/.test(id)) return `${shared}\n优先保持结构化字段完整，字段名必须与模板一致。`;
+  if (/deepseek/.test(id)) return `${shared}\n中文电商文案要自然，避免关键词堆砌，保持 JSON 简洁稳定。`;
+  if (/qwen|kimi|moonshot|glm|zhipu|minimax/.test(id)) return `${shared}\n中文语感优先，标题和命名要像真实服装商品文案。`;
+  if (/grok|x-ai/.test(id)) return `${shared}\n创意可以更灵动，但必须克制，不要偏离商品本身。`;
+  if (/mistral|pixtral|llama|meta/.test(id)) return `${shared}\n回答尽量短，避免多余文本，确保 JSON 可解析。`;
+  return shared;
 };
 
 const flattenProductNames = (parsed: any): string[] => {

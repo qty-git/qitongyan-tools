@@ -45,16 +45,27 @@ export async function handler(event) {
   if (event.httpMethod !== "POST") return json(405, { error: "Method not allowed" });
 
   try {
-    const { action, imageBase64, prompt, model: requestedModel } = JSON.parse(event.body || "{}");
+    const { action, imageBase64, prompt, model: requestedModel, supportsVision } = JSON.parse(event.body || "{}");
     const authHeader = event.headers.authorization || event.headers.Authorization || "";
     const bearerToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : "";
     const apiKey = bearerToken || process.env.OPENROUTER_API_KEY;
+    const baseURL = "https://openrouter.ai/api/v1";
+
+    if (action === "models") {
+      const response = await fetch(`${baseURL}/models`, {
+        headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {}
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        return json(response.status, { error: data.error?.message || data.error || "获取模型列表失败" });
+      }
+      return json(200, { models: data.data || [] });
+    }
 
     if (!apiKey) {
       return json(500, { error: "请在系统设置中填写 OpenRouter API Key" });
     }
 
-    const baseURL = "https://openrouter.ai/api/v1";
     const model = requestedModel || process.env.OPENROUTER_MODEL || "openai/gpt-4.1-mini";
     const client = new OpenAI({
       apiKey,
@@ -65,10 +76,30 @@ export async function handler(event) {
       }
     });
 
+    if (action === "test-model") {
+      const testContent = Boolean(supportsVision)
+        ? [
+            { type: "text", text: "Reply with JSON only: {\"ok\":true}" },
+            {
+              type: "image_url",
+              image_url: { url: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=" }
+            }
+          ]
+        : "Reply with JSON only: {\"ok\":true}";
+
+      const response = await client.chat.completions.create({
+        model,
+        messages: [{ role: "user", content: testContent }],
+        max_tokens: 24
+      });
+      return json(200, { ok: Boolean(response.choices?.[0]?.message?.content || response.choices?.[0]?.message?.reasoning) });
+    }
+
     if (action === "test") {
       const response = await client.chat.completions.create({
         model,
-        messages: [{ role: "user", content: "Hello, reply with JSON only: {\"status\":\"ok\"}" }]
+        messages: [{ role: "user", content: "Hello, reply with JSON only: {\"status\":\"ok\"}" }],
+        max_tokens: 24
       });
       return json(200, { ok: Boolean(response.choices?.[0]?.message?.content) });
     }

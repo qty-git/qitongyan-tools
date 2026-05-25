@@ -12,12 +12,22 @@ import { cn } from './lib/utils';
 import { extractAttributesOnly, generateTitlesOnly, generateProductNamesOnly, AttributeDefinition, LLMConfig } from './services/llmService';
 import { DEFAULT_PROMPTS } from './services/prompts';
 import {
-  DEFAULT_FEATURE_MODELS,
   FEATURE_LABELS,
   FEATURE_ORDER,
   FeatureKey,
-  getModelById
-} from './data/openrouterModels';
+  ModelRegistryOption,
+  ModelTestRecord,
+  buildModelRegistry,
+  fetchOpenRouterModels,
+  getModelById,
+  loadRegistryCache,
+  loadTestCache,
+  recommendDefaultModels,
+  saveRegistryCache,
+  saveTestCache,
+  selectModelsToTest,
+  testOpenRouterModel
+} from './services/modelRegistryBuilder';
 
 import { SettingsModal } from './components/SettingsModal';
 import { HistoryPanel } from './components/HistoryPanel';
@@ -41,19 +51,11 @@ const safeJSONParse = (val: string | null, fallback: any) => {
   }
 };
 
-const normalizeFeatureModels = (stored: Partial<Record<FeatureKey, string>> = {}): Record<FeatureKey, string> => {
-  const merged = { ...DEFAULT_FEATURE_MODELS, ...stored };
-  const normalized = { ...merged };
-
-  for (const feature of FEATURE_ORDER) {
-    const modelInfo = getModelById(normalized[feature]);
-    if (!modelInfo || (feature === 'attributesOnly' && !modelInfo.supportsVision)) {
-      normalized[feature] = DEFAULT_FEATURE_MODELS[feature];
-    }
-  }
-
-  return normalized;
-};
+const emptyFeatureModels = (): Record<FeatureKey, string> => ({
+  attributesOnly: '',
+  titleOnly: '',
+  naming: ''
+});
 
 const compressImage = (base64Str: string, maxWidth = 1200, maxHeight = 1600): Promise<string> => {
   return new Promise((resolve) => {
@@ -161,9 +163,20 @@ function AppContent() {
   
   // OpenRouter configuration
   const [openrouterKey, setOpenrouterKey] = useState(() => localStorage.getItem('openrouter_key') || localStorage.getItem('openai_key') || '');
-  const [featureModels, setFeatureModels] = useState<Record<FeatureKey, string>>(() => normalizeFeatureModels(
-    safeJSONParse(localStorage.getItem('fashion_feature_models'), {})
-  ));
+  const [testRecords, setTestRecords] = useState<Record<string, ModelTestRecord>>(() => loadTestCache());
+  const [modelRegistry, setModelRegistry] = useState<ModelRegistryOption[]>(() => {
+    const cached = loadRegistryCache();
+    return cached ? buildModelRegistry(cached.rawModels, loadTestCache()) : [];
+  });
+  const [modelRegistryLoading, setModelRegistryLoading] = useState(false);
+  const [modelRegistryTesting, setModelRegistryTesting] = useState(false);
+  const [modelRegistryError, setModelRegistryError] = useState<string | null>(null);
+  const [modelRegistryFetchedAt, setModelRegistryFetchedAt] = useState<number | null>(() => loadRegistryCache()?.fetchedAt || null);
+  const [advancedModelMode, setAdvancedModelMode] = useState(() => localStorage.getItem('fashion_advanced_model_mode') === 'true');
+  const [featureModels, setFeatureModels] = useState<Record<FeatureKey, string>>(() => ({
+    ...emptyFeatureModels(),
+    ...safeJSONParse(localStorage.getItem('fashion_feature_models'), {})
+  }));
   const [selectedTasks, setSelectedTasks] = useState<Record<FeatureKey, boolean>>(() => ({
     attributesOnly: true,
     titleOnly: false,
@@ -226,11 +239,72 @@ function AppContent() {
     safeLocalStorageSet('fashion_selected_tasks', JSON.stringify(selectedTasks));
   }, [selectedTasks]);
   useEffect(() => {
-    const normalized = normalizeFeatureModels(featureModels);
-    if (FEATURE_ORDER.some(feature => normalized[feature] !== featureModels[feature])) {
-      setFeatureModels(normalized);
+    localStorage.setItem('fashion_advanced_model_mode', String(advancedModelMode));
+  }, [advancedModelMode]);
+  useEffect(() => {
+    saveTestCache(testRecords);
+    const cached = loadRegistryCache();
+    if (cached) setModelRegistry(buildModelRegistry(cached.rawModels, testRecords));
+  }, [testRecords]);
+  useEffect(() => {
+    if (modelRegistry.length === 0) return;
+    const recommended = recommendDefaultModels(modelRegistry);
+    setFeatureModels(prev => {
+      const next = { ...prev };
+      let changed = false;
+      for (const feature of FEATURE_ORDER) {
+        const current = getModelById(modelRegistry, next[feature]);
+        const invalid = !next[feature] || (!advancedModelMode && (!current || current.testStatus === 'failed' || (feature === 'attributesOnly' && !current.supportsVision)));
+        if (invalid && recommended[feature]) {
+          next[feature] = recommended[feature];
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [modelRegistry, advancedModelMode]);
+
+  const refreshModelRegistry = async () => {
+    setModelRegistryLoading(true);
+    setModelRegistryError(null);
+    try {
+      const rawModels = await fetchOpenRouterModels(openrouterKey);
+      saveRegistryCache(rawModels);
+      setModelRegistryFetchedAt(Date.now());
+      setModelRegistry(buildModelRegistry(rawModels, testRecords));
+    } catch (err: any) {
+      setModelRegistryError(err?.message || '模型列表刷新失败');
+    } finally {
+      setModelRegistryLoading(false);
     }
-  }, [featureModels]);
+  };
+
+  const testRecommendedModels = async () => {
+    if (!openrouterKey || modelRegistryTesting || modelRegistry.length === 0) return;
+    setModelRegistryTesting(true);
+    const candidates = selectModelsToTest(modelRegistry).filter(model => testRecords[model.modelId]?.status !== 'success');
+    const nextRecords = { ...testRecords };
+    try {
+      for (const model of candidates) {
+        nextRecords[model.modelId] = { status: 'testing' };
+        setTestRecords({ ...nextRecords });
+        nextRecords[model.modelId] = await testOpenRouterModel(model, openrouterKey);
+        setTestRecords({ ...nextRecords });
+      }
+    } finally {
+      setModelRegistryTesting(false);
+    }
+  };
+
+  useEffect(() => {
+    refreshModelRegistry();
+  }, []);
+
+  useEffect(() => {
+    if (!openrouterKey || modelRegistry.length === 0) return;
+    const hasFreshSuccess = Object.values(testRecords).some(record => record.status === 'success');
+    if (!hasFreshSuccess) testRecommendedModels();
+  }, [openrouterKey, modelRegistry.length]);
 
   useEffect(() => {
     localStorage.setItem('fashion_generated_product_name', generatedProductName);
@@ -454,15 +528,20 @@ function AppContent() {
       return null;
     }
 
-    const modelId = featureModels[feature] || DEFAULT_FEATURE_MODELS[feature];
-    const modelInfo = getModelById(modelId);
+    const modelId = featureModels[feature];
+    if (!modelId) {
+      setError("模型列表尚未加载完成，请先刷新或测试 OpenRouter 模型");
+      setShowSettings(true);
+      return null;
+    }
+    const modelInfo = getModelById(modelRegistry, modelId);
     return {
       provider: 'openai',
       apiKey: '',
       model: modelId,
       openrouterKey,
       openrouterModel: modelId,
-      supportsVision: modelInfo?.supportsVision,
+      supportsVision: feature === 'attributesOnly' ? true : Boolean(modelInfo?.supportsVision),
       onWarning: (msg) => setWarnings(prev => prev.includes(msg) ? prev : [...prev, msg]),
       onModelChange: (model) => setCurrentAttemptingModel(model),
       customPrompts
@@ -486,8 +565,8 @@ function AppContent() {
 
   const runAttributesTask = async () => {
     if (!image || !selectedCategory) throw new Error('请先上传图片并选择类目');
-    const modelInfo = getModelById(featureModels.attributesOnly);
-    if (!modelInfo?.supportsVision) {
+    const modelInfo = getModelById(modelRegistry, featureModels.attributesOnly);
+    if (!advancedModelMode && !modelInfo?.supportsVision) {
       throw new Error('属性识别模型必须支持图片，请更换支持图片的模型');
     }
     const llmConfig = getLLMConfig('attributesOnly');
@@ -876,7 +955,7 @@ function AppContent() {
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const modelSummary = FEATURE_ORDER
-    .map(feature => `${FEATURE_LABELS[feature]} ${getModelById(featureModels[feature])?.displayName || featureModels[feature]}`)
+    .map(feature => `${FEATURE_LABELS[feature]} ${getModelById(modelRegistry, featureModels[feature])?.displayName || featureModels[feature] || '待推荐'}`)
     .join(' / ');
 
   return (
@@ -977,6 +1056,9 @@ function AppContent() {
                 setSelectedTasks={setSelectedTasks}
                 featureModels={featureModels}
                 setFeatureModels={setFeatureModels}
+                modelRegistry={modelRegistry}
+                modelRegistryLoading={modelRegistryLoading}
+                modelRegistryTesting={modelRegistryTesting}
                 handleExtractAttributes={handleExtractAttributes}
                 handleGenerateTitles={handleGenerateTitles}
                 handleGenerateNames={handleGenerateNames}
@@ -1052,6 +1134,15 @@ function AppContent() {
         setOpenrouterKey={setOpenrouterKey}
         featureModels={featureModels}
         setFeatureModels={setFeatureModels}
+        modelRegistry={modelRegistry}
+        modelRegistryLoading={modelRegistryLoading}
+        modelRegistryTesting={modelRegistryTesting}
+        modelRegistryError={modelRegistryError}
+        modelRegistryFetchedAt={modelRegistryFetchedAt}
+        refreshModelRegistry={refreshModelRegistry}
+        testRecommendedModels={testRecommendedModels}
+        advancedModelMode={advancedModelMode}
+        setAdvancedModelMode={setAdvancedModelMode}
         showOpenrouterKey={showOpenrouterKey}
         setShowOpenrouterKey={setShowOpenrouterKey}
         customPrompts={customPrompts}
