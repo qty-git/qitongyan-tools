@@ -1,201 +1,296 @@
-# Windows Desktop Workflow Design
+# Windows 桌面版商品上架资料工作流设计
 
-## Goal
+## 目标
 
-Create a new personal Windows-oriented tool for preparing and publishing fashion products without disrupting the existing web image-recognition tool.
+在不影响当前网页识别工具继续使用的前提下，新建一个面向 Windows 中控使用的个人桌面工具。
 
-The current web project remains usable as-is. The new tool will be developed in a separate GitHub repository, using selected logic from this project as a starting point.
+当前网页工具继续保留，用于单图识别、标题生成、属性识别和表格导出。新工具另建 GitHub 仓库开发，用来解决本地商品资料 Excel 搜索、款号查询、图片整理、AI 识别、总表合并和后续自动上架。
 
-## User Workflow
+## 修正后的核心流程
 
-1. The operator receives a folder of product images named by style number.
-2. The operator opens the Windows desktop tool.
-3. The tool scans a configured local folder that contains many Excel product information files.
-4. The tool builds or refreshes a local style-number index from those Excel files.
-5. The operator imports or selects a batch image folder.
-6. The tool extracts style numbers from image filenames and matches them to indexed product data.
-7. The tool runs the existing AI image-recognition flow to generate product names, Douyin titles, subtitles, and category attributes.
-8. The tool merges matched base product data with AI-generated data into a final listing table.
-9. The operator reviews missing matches, invalid fields, and AI confidence issues.
-10. The tool exports and saves a final master table.
-11. A later phase uses the final table to create and publish Douyin product links through API or browser automation.
+真实流程不是先上传图片再查商品资料，而是：
 
-## Recommended Product Shape
+1. 操作者先拿到一批款号。
+2. 工具在本地商品资料 Excel 文件夹中搜索这些款号。
+3. 工具从商品资料表中读取该款号的基础信息。
+4. 工具从商品资料表中提取该款号对应的产品图，或从指定图片目录匹配产品图。
+5. 工具把产品图统一保存为 `款号.png`。
+6. 工具把 `款号.png` 送入当前 AI 识别流程，生成商品名称、抖音标题、副标题和商品属性。
+7. 工具把“商品资料表信息 + AI 识别结果”合并成最终上架总表。
+8. 操作者检查缺失、冲突和识别失败项。
+9. 工具导出并保存最终总表。
+10. 后续阶段再根据最终总表自动创建抖音商品链接并上架。
 
-Build a new Windows desktop app instead of extending the existing browser-only web tool.
+## 根据示例 Excel 的表格结构
 
-Recommended stack:
+示例文件：
 
-- Electron or Tauri shell for Windows local file access.
-- Existing React UI patterns reused where practical.
-- Node-side or Rust-side local services for folder scanning, Excel parsing, and file persistence.
-- SQLite for local indexes, batch records, and publish results.
-- Existing OpenRouter/LLM prompt and recognition logic adapted from the current project.
+`/Users/qiyiyi/Downloads/5月手卡资料5.11-5.21.xlsx`
 
-Electron is the easier first choice because the current project is already React and TypeScript, and Excel/file-system libraries are readily available in Node.
+工作簿包含这些工作表：
 
-## Repository Strategy
+- `手卡资料`：实际商品资料，约 91 个商品块。
+- `手卡模板`：同结构模板。
+- `尺码，分类`：主播、尺码、分类、品牌、供应商等字典。
+- `导入模板`：款号、执行标准、安全类别、成分、重量、分类、名称、供应商、品牌、年份、季节等字段模板。
+- `推荐尺码`：按供应商维护的建议体重/尺码参考。
 
-Use two separate repositories:
+重点是 `手卡资料` 不是普通“一行一个商品”的平表，而是重复的手卡块结构。每个商品块通常从一行表头开始，下一行是商品基础信息。
 
-- Existing repository: keep the current web recognition tool stable.
-- New repository: desktop workflow app, copied from the current project only where useful.
+识别商品块的规则：
 
-This avoids desktop dependencies, file-system permissions, SQLite, and publish automation from disrupting the current web build.
+- 找到某一行第 4 列为 `款号`。
+- 下一行第 4 列的值就是真实款号。
+- 示例中识别到 91 个商品块，例如 `24324`、`24501`、`24548`、`24422AB`、`80996AB`、`80130短款`、`80130长款`。
 
-The new repository can begin from a copy of the current project, then remove or adapt browser-only assumptions such as localStorage-only persistence.
+## 商品块字段映射
 
-## Data Model
+以商品数据行 `r` 为起点，主要字段位置如下：
 
-The desktop tool should store local data only. No shared cloud database is required.
+- `B列`：选款日期
+- `C列`：供应商
+- `D列`：款号
+- `E列`：颜色
+- `F列`：大类（系统类目）
+- `G列`：品牌
+- `H列`：资料日期
+- `I列`：销售渠道
+- `J列`：税后价
+- `K列`：公司定价
+- `L列`：优惠类型
+- `M列`：最终店铺售价
+- `N列`：吊牌价
+- `P列`：商品原始名称/版型描述
+- `V列`：吊牌图款号
 
-Core records:
+后续行包含补充信息：
 
-- Product source row: style number, size, color, price, stock, category, supplier/source file, and raw Excel row data.
-- Image asset: file path, filename, extracted style number, image group, and match status.
-- AI result: generated title, subtitle, product name, extracted attributes, model metadata, and errors.
-- Merged listing row: final fields ready for export or publishing.
-- Batch: imported folder, scan time, output path, counts, and status.
-- Publish result: item id, link, success/failure status, and failure reason.
+- `r+1` 行附近：面料名称
+- `r+3` 行附近：面料成分、里料成分
+- `r+10` 行附近：执行标准、安全技术类别、重量
+- 尺寸表区域：衣长、肩宽、胸围、袖长、袖口、建议体重等
+- SKU 区域：`颜色规格` 与 `商家编码` 成对出现，例如 `白色L -> 24324白色L`
 
-## File And Excel Scanning
+第一版解析器应按固定手卡块结构读取这些字段，不要只按通用表头逐行读取。
 
-The tool should let the operator configure one or more product-data folders.
+## 图片处理设计
 
-Scanning behavior:
+示例 `手卡资料` 表中包含内嵌产品图。产品图通常锚定在商品块起始行附近的 `A列`。
 
-- Recursively find `.xlsx`, `.xls`, and optionally `.csv` files.
-- Ignore temporary Office files such as files beginning with `~$`.
-- Track file path, modified time, and size.
-- Only re-parse files that are new or changed.
-- Normalize column names through configurable aliases.
-- Build a local style-number index in SQLite.
+图片来源优先级：
 
-The initial implementation should support common column aliases such as:
+1. Excel 内嵌产品图：优先从 `手卡资料` 中提取。
+2. 本地图片文件夹：如果 Excel 没有可提取图片，再按款号匹配本地图片。
+3. 人工补图：仍然找不到时，标记为缺图，由操作者手动补充。
 
-- Style number: `款号`, `货号`, `商品货号`, `编码`, `SKU`
-- Size: `尺码`, `规格`, `码数`
-- Price: `价格`, `售价`, `吊牌价`
-- Stock: `库存`, `数量`
-- Color: `颜色`, `色号`, `色系`
-- Category: `类目`, `大类目`, `商品类目`
+图片保存规则：
 
-If multiple Excel rows match the same style number, the tool should keep all candidates and show a conflict for operator review rather than silently choosing one.
+- 标准输出文件名：`款号.png`
+- 示例：`24324.png`、`24422AB.png`、`80130短款.png`
+- 如果一个款号有多张图，主图保存为 `款号.png`，其他图保存为 `款号_2.png`、`款号_3.png`
+- 如果图片提取失败，该款号不能进入自动识别队列，需显示“缺少产品图”
 
-## Style Number Matching
+## 推荐的新工具形态
 
-Image filenames are the primary matching key.
+新工具建议做成 Windows 桌面应用，而不是继续做纯网页。
 
-Default filename rules:
+推荐技术方向：
 
-- Remove extension.
-- Treat suffixes like `-1`, `_1`, `主图`, `详情`, and `白底` as image sequence labels when possible.
-- Match the remaining base token to the style-number index.
+- 使用 Electron 作为桌面壳，复用当前 React/TypeScript 经验。
+- 使用 Node 侧能力读取本地文件夹、解析 Excel、提取内嵌图片、保存图片和总表。
+- 使用 SQLite 保存本地索引、批次记录、AI 结果和发布结果。
+- 复用当前项目中的 OpenRouter 模型配置、Prompt、属性识别和标题生成逻辑。
 
-The tool should expose editable matching rules later, but the first version can implement a conservative default and show unmatched images clearly.
+这样中控拿到的是一个 Windows 软件，例如：
 
-## Existing Web Tool Compatibility
+- `FashionAI-Setup.exe`
+- 或 `FashionAI-Portable.zip`
 
-The current web tool should not be modified for desktop-only behavior.
+不需要打开终端，也不需要理解代码。
 
-Safe reuse from the current project:
+## 仓库策略
 
-- Attribute library format.
-- LLM prompt templates.
-- OpenRouter model and task concepts.
-- Single-image recognition flow.
-- Result display and editing concepts.
-- CSV/XLSX import/export experience.
+采用双仓库策略：
 
-Behavior to keep isolated in the new repository:
+- 当前仓库：继续作为网页识别工具，保持可用。
+- 新仓库：作为 Windows 桌面版商品资料工作流工具。
 
-- Local folder scanning.
-- SQLite persistence.
-- Windows installer or portable build.
-- Batch image-folder import.
-- Douyin publishing automation.
+不要直接把桌面文件系统、SQLite、Excel 图片提取、抖店自动上架等能力塞进当前网页仓库。这样可以避免新功能破坏已有网页工具。
 
-## First Implementation Phase
+新仓库可以复制当前项目作为起点，但要逐步把浏览器本地存储模式改成本地数据库和本地文件输出模式。
 
-Phase 1 should produce a desktop workflow that stops before automatic Douyin publishing.
+## 第一阶段功能范围
 
-Included:
+第一阶段目标是完成“款号查资料 + 图片整理 + AI 识别 + 合并总表”，暂不自动上架。
 
-- Windows desktop shell.
-- Product-data folder settings.
-- Excel folder scan and local style-number index.
-- Batch image folder import.
-- Style-number extraction and match results.
-- AI generation using the existing recognition flow.
-- Merged final table.
-- Missing/conflict/error review.
-- Export to `.xlsx` and/or `.csv`.
-- Local batch save and reopen.
+包含：
 
-Excluded:
+- 配置商品资料 Excel 文件夹。
+- 递归扫描 `.xlsx`、`.xls`、`.csv` 文件。
+- 忽略 Office 临时文件，例如 `~$` 开头的文件。
+- 解析 `手卡资料` 这种块状手卡表。
+- 按款号建立本地索引。
+- 支持导入或粘贴一批待处理款号。
+- 根据款号查找商品资料。
+- 从 Excel 内嵌图中提取产品图。
+- 将产品图保存为 `款号.png`。
+- 调用当前 AI 识别流程生成标题、名称和属性。
+- 合并基础资料与 AI 结果。
+- 展示缺图、未匹配、重复款号、AI 失败等异常。
+- 导出最终总表，优先支持 `.xlsx`，同时可支持 `.csv`。
+- 保存本次批次记录，方便后续继续处理。
 
-- Automatic Douyin login.
-- Automatic product publishing.
-- Multi-shop collaboration.
-- Cloud sync.
-- Shared user accounts.
+不包含：
 
-## Future Publishing Phase
+- 自动登录抖店。
+- 自动创建商品链接。
+- 自动上架。
+- 多店铺联动。
+- 云端同步。
+- 多用户协作。
 
-After Phase 1 is stable, publishing can be added through one of two paths:
+## 本地索引设计
 
-1. Douyin/Doudian Open Platform API:
-   - More stable for batch creation.
-   - Requires application credentials, authorization, category/attribute mappings, image upload flow, and API permission checks.
+工具不应该每次处理时都完整重读所有 Excel。应建立本地索引。
 
-2. Browser automation:
-   - Easier to trial if API access is not ready.
-   - More sensitive to page changes, login state, captcha, and platform risk controls.
+索引刷新逻辑：
 
-The final listing table should be designed so either publishing path can consume it.
+- 记录 Excel 文件路径、修改时间、文件大小。
+- 只重新解析新增或修改过的文件。
+- 以款号为主键建立商品索引。
+- 保留来源文件、工作表名、起始行号，方便追溯。
+- 如果同一款号出现在多个文件或多个商品块中，标记为重复款号，由操作者选择。
 
-## Error Handling
+建议保存的数据：
 
-The desktop tool should make errors reviewable instead of blocking the whole batch.
+- 款号
+- 供应商
+- 品牌
+- 大类（系统类目）
+- 颜色
+- 原始名称
+- 税后价
+- 公司定价
+- 优惠类型
+- 最终店铺售价
+- 吊牌价
+- 面料名称
+- 成分
+- 执行标准
+- 安全类别
+- 重量
+- 尺寸表
+- SKU 明细
+- 产品图路径
+- 来源文件路径
+- 来源行号
 
-Examples:
+## AI 识别与合并规则
 
-- No matching style number found.
-- Multiple matching product rows found.
-- Required Excel columns missing.
-- AI recognition failed.
-- Required Douyin listing field missing.
-- Export failed because the target file is open.
-- Publishing failed for a specific row.
+AI 识别仍然使用当前网页工具的核心能力：
 
-Each batch row should have a status and a human-readable reason.
+- 读取 `款号.png`
+- 根据图片识别商品属性
+- 生成抖音主标题
+- 生成副标题
+- 生成商品花名/名称候选
 
-## Testing Strategy
+合并总表时，字段来源优先级建议为：
 
-Use focused tests around the parts most likely to break:
+1. 商品资料表中的确定字段优先，例如款号、价格、品牌、供应商、颜色、SKU、成分、执行标准。
+2. AI 结果补充视觉属性和运营文案，例如标题、商品属性、风格、领型、袖型、裙长等。
+3. 人工修改结果优先级最高，应覆盖前两者。
 
-- Filename-to-style-number extraction.
-- Excel column alias normalization.
-- Duplicate style-number conflict handling.
-- Incremental folder scan behavior.
-- Merged table field precedence.
-- Exported workbook headers and row values.
+## 最终总表建议字段
 
-Manual verification should include a small Windows-like sample:
+第一版最终总表建议至少包含：
 
-- Several Excel files in nested folders.
-- At least one duplicate style number.
-- At least one unmatched image.
-- Multiple images for the same style number.
-- One successful end-to-end merged export.
+- 处理状态
+- 失败/提示原因
+- 款号
+- 图片路径
+- 供应商
+- 品牌
+- 大类（系统类目）
+- 抖音类目
+- 原始名称
+- AI 商品名
+- 抖音主标题
+- 副标题
+- 颜色
+- 尺码/SKU
+- 商家编码
+- 税后价
+- 公司定价
+- 优惠类型
+- 最终店铺售价
+- 吊牌价
+- 面料名称
+- 成分
+- 执行标准
+- 安全类别
+- 重量
+- AI 识别属性
+- 人工备注
+- 后续商品链接
 
-## Open Questions
+后续如果接抖店自动上架，再把表格字段扩展为抖店 API 或抖店后台所需字段。
 
-Before implementation, confirm:
+## 后续自动上架阶段
 
-- Whether Excel column names are mostly consistent or highly varied.
-- Typical image filename patterns.
-- Whether one style number can have multiple colors or sizes across rows.
-- Which fields must appear in the final master table.
-- Whether Phase 1 export should be CSV, XLSX, or both.
+第一阶段稳定后，再做自动上架。
+
+可选路线：
+
+1. 抖店开放平台 API：
+   - 更稳定，适合长期批量发布。
+   - 需要应用凭证、授权、类目映射、属性映射、图片上传和接口权限。
+
+2. 浏览器自动化：
+   - 更贴近中控手动上链接流程。
+   - 更容易受登录状态、验证码、页面改版和风控影响。
+
+最终总表应保持结构化，保证这两种路线都可以读取。
+
+## 错误处理
+
+工具应把异常显示在批次表中，而不是让整个流程中断。
+
+常见异常：
+
+- 款号在商品资料表中找不到。
+- 款号重复，需要人工选择。
+- 商品块结构异常。
+- 产品图提取失败。
+- 商品图缺失。
+- SKU 区域为空。
+- 必填价格为空。
+- AI 识别失败。
+- 导出失败，例如目标 Excel 正在打开。
+
+每一行都应有状态和原因，方便中控逐项处理。
+
+## 测试重点
+
+第一版需要重点测试：
+
+- 能否识别 `手卡资料` 中的 91 个商品块。
+- 能否按第 4 列 `款号` 前一行表头定位真实商品块，而不是误把 `颜色规格` 或 SKU 行当成商品。
+- 能否提取 Excel 内嵌产品图并保存为 `款号.png`。
+- 能否解析价格、品牌、颜色、类目、成分、执行标准、安全类别、重量。
+- 能否解析 SKU 明细，例如 `白色L -> 24324白色L`。
+- 能否处理 `24422AB`、`80130短款` 这种非纯数字款号。
+- 能否处理缺图、重复款号、缺价格、缺 SKU。
+- 能否导出最终 `.xlsx` 总表。
+
+## 待确认问题
+
+进入实施前，还需要确认：
+
+- 款号是从哪里给到中控：文本列表、Excel 列表，还是订单/选品表？
+- 商品资料 Excel 是否都使用这个“手卡资料”模板，还是还有其他格式？
+- Excel 内嵌图是否就是最终要识别的商品图，还是还需要从外部图片文件夹找更清晰图片？
+- 一个款号是否可能对应多个颜色主图？
+- 第一版最终总表必须对接哪个抖店上架模板字段？
+- 第一版是否只导出 `.xlsx`，还是也要导出 `.csv`？
 
