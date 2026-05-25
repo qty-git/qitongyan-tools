@@ -148,7 +148,9 @@ export async function generateTitlesOnly(
   config: LLMConfig,
   _titleLengthRange: [number, number] = [22, 25]
 ): Promise<{ title: string; subtitle: string }> {
-  const prompt = replacePlaceholders(getPrompt('titleOnly', config), {
+  const hasAttributes = Object.keys(attributes || {}).length > 0;
+  const promptType: PromptType = hasAttributes ? 'attributeEnhancedTitleMode' : 'visualTitleMode';
+  const prompt = replacePlaceholders(getPrompt(promptType, config), {
     category: selectedCategory,
     attributes: JSON.stringify(attributes, null, 2),
     hotKeywords

@@ -65,6 +65,8 @@ export function CategorySelector({
 }: CategorySelectorProps) {
   const allSelected = FEATURE_ORDER.every(feature => selectedTasks[feature]);
   const anySelected = FEATURE_ORDER.some(feature => selectedTasks[feature]);
+  const selectedTasksNeedCategory = selectedTasks.attributesOnly || selectedTasks.naming;
+  const canRunSelectedTasks = Boolean(image && anySelected && !isExtracting && (!selectedTasksNeedCategory || selectedCategory));
 
   const setTaskSelected = (feature: FeatureKey, checked: boolean) => {
     setSelectedTasks(prev => ({ ...prev, [feature]: checked }));
@@ -241,11 +243,11 @@ export function CategorySelector({
           </div>
 
           <button
-            disabled={!image || !selectedCategory || !anySelected || isExtracting}
+            disabled={!canRunSelectedTasks}
             onClick={handleRunSelectedTasks}
             className={cn(
               "w-full py-4 rounded-xl font-bold flex items-center justify-center gap-2 transition-all shadow-sm text-sm",
-              !image || !selectedCategory || !anySelected || isExtracting
+              !canRunSelectedTasks
                 ? "bg-gray-100 text-gray-400 cursor-not-allowed"
                 : "bg-blue-600 text-white hover:bg-blue-700 active:scale-[0.98] shadow-blue-100"
             )}
@@ -263,7 +265,7 @@ export function CategorySelector({
               <button
                 key={action.feature}
                 type="button"
-                disabled={!image || !selectedCategory || isExtracting}
+                disabled={!image || isExtracting || (action.feature !== 'titleOnly' && !selectedCategory)}
                 onClick={action.onClick}
                 className={cn(
                   "py-2 rounded-lg border border-gray-100 bg-white text-xs font-black transition-colors disabled:opacity-40 disabled:cursor-not-allowed",

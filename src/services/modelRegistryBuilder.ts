@@ -311,6 +311,36 @@ export function recommendDefaultModels(models: ModelRegistryOption[]): Record<Fe
   const pick = (feature: FeatureKey) => {
     const tested = getEnabledModelsForFeature(models, feature).filter(model => model.testStatus === 'success');
     const candidates = tested.length > 0 ? tested : getEnabledModelsForFeature(models, feature);
+    const findByProviderPriority = (providers: string[], requireVision = false) => {
+      for (const provider of providers) {
+        const model = candidates.find(candidate => candidate.provider === provider && (!requireVision || candidate.supportsVision));
+        if (model) return model.modelId;
+      }
+      return '';
+    };
+    if (feature === 'titleOnly') {
+      const providerPriority = ['OpenAI', 'Google Gemini', 'xAI Grok', 'DeepSeek'];
+      const preferredVision = findByProviderPriority(providerPriority, true);
+      if (preferredVision) return preferredVision;
+      const preferred = findByProviderPriority(providerPriority);
+      if (preferred) return preferred;
+      const fallbackProviderPriority = ['Moonshot Kimi', 'MiniMax', 'Zhipu GLM', 'Mistral', 'Meta Llama'];
+      const fallbackVision = findByProviderPriority(fallbackProviderPriority, true);
+      if (fallbackVision) return fallbackVision;
+      const fallback = findByProviderPriority(fallbackProviderPriority);
+      if (fallback) return fallback;
+      const nonQwenVision = candidates.find(model => model.supportsVision && model.provider !== 'Qwen');
+      if (nonQwenVision) return nonQwenVision.modelId;
+      const nonQwen = candidates.find(model => model.provider !== 'Qwen');
+      if (nonQwen) return nonQwen.modelId;
+    }
+    if (feature === 'naming') {
+      const providerPriority = ['OpenAI', 'Google Gemini', 'xAI Grok', 'DeepSeek', 'Moonshot Kimi', 'MiniMax'];
+      const preferred = findByProviderPriority(providerPriority);
+      if (preferred) return preferred;
+      const nonQwen = candidates.find(model => model.provider !== 'Qwen');
+      if (nonQwen) return nonQwen.modelId;
+    }
     if (feature !== 'attributesOnly' && candidates[0]) {
       const textOnly = candidates.find(model => !model.supportsVision && model.featureScores[feature] >= candidates[0].featureScores[feature] - 20);
       if (textOnly) return textOnly.modelId;

@@ -189,8 +189,8 @@ function AppContent() {
     naming: 'idle'
   });
   const [taskErrors, setTaskErrors] = useState<Partial<Record<FeatureKey, string>>>({});
-  const [minTitleLen, setMinTitleLen] = useState<number>(() => Number(localStorage.getItem('fashion_min_title_len')) || 28);
-  const [maxTitleLen, setMaxTitleLen] = useState<number>(() => Number(localStorage.getItem('fashion_max_title_len')) || 30);
+  const [minTitleLen, setMinTitleLen] = useState<number>(() => Number(localStorage.getItem('fashion_min_title_len')) || 23);
+  const [maxTitleLen, setMaxTitleLen] = useState<number>(() => Number(localStorage.getItem('fashion_max_title_len')) || 25);
   const [showSettings, setShowSettings] = useState(false);
   
   const [showOpenrouterKey, setShowOpenrouterKey] = useState(false);
@@ -202,12 +202,17 @@ function AppContent() {
         const migratePrompt = (key: keyof typeof DEFAULT_PROMPTS) => {
           const value = parsed?.[key];
           if (typeof value === 'string') return value;
+          if (key === 'visualTitleMode' || key === 'attributeEnhancedTitleMode') {
+            const legacyTitle = parsed?.titleOnly;
+            if (typeof legacyTitle === 'string') return DEFAULT_PROMPTS[key];
+          }
           return DEFAULT_PROMPTS[key];
         };
 
         return {
           attributesOnly: migratePrompt('attributesOnly'),
-          titleOnly: migratePrompt('titleOnly'),
+          visualTitleMode: migratePrompt('visualTitleMode'),
+          attributeEnhancedTitleMode: migratePrompt('attributeEnhancedTitleMode'),
           naming: migratePrompt('naming')
         };
       } catch {
@@ -319,10 +324,18 @@ function AppContent() {
   }, [namingFeedback]);
 
   useEffect(() => {
+    if (minTitleLen !== 23) {
+      setMinTitleLen(23);
+      return;
+    }
     localStorage.setItem('fashion_min_title_len', minTitleLen.toString());
   }, [minTitleLen]);
 
   useEffect(() => {
+    if (maxTitleLen !== 25) {
+      setMaxTitleLen(25);
+      return;
+    }
     localStorage.setItem('fashion_max_title_len', maxTitleLen.toString());
   }, [maxTitleLen]);
 
@@ -585,23 +598,49 @@ function AppContent() {
     return finalAttributes;
   };
 
+  const normalizeTitleText = (value: string) => value.replace(/[，。！？、,.!?；;：:\s]/g, '');
+  const isTitleLengthValid = (title: string, subtitle: string) => {
+    const titleCount = getCharCount(title);
+    const subtitleCount = getCharCount(subtitle);
+    return titleCount >= 23 && titleCount <= 25 && subtitleCount >= 10 && subtitleCount <= 12;
+  };
+
   const runTitlesTask = async (attributesForTitle: Record<string, string>) => {
-    if (!image || !selectedCategory) throw new Error('请先上传图片并选择类目');
-    if (Object.keys(attributesForTitle).length === 0) {
-      throw new Error('标题生成需要先有 attributes：请勾选属性识别，或先完成属性识别。');
-    }
+    if (!image) throw new Error('请先上传图片');
     const llmConfig = getLLMConfig('titleOnly');
     if (!llmConfig) throw new Error('请先填写 OpenRouter API Key');
 
     const currentHotKeywords = categoryKeywords[selectedCategory] || '';
-    const result = await generateTitlesOnly(
+    const categoryForTitle = selectedCategory || '大码女装';
+    let result = await generateTitlesOnly(
       image,
-      selectedCategory,
+      categoryForTitle,
       attributesForTitle,
       currentHotKeywords,
       llmConfig,
-      [minTitleLen, maxTitleLen]
+      [23, 25]
     );
+    result = {
+      title: normalizeTitleText(result.title),
+      subtitle: normalizeTitleText(result.subtitle)
+    };
+    if (!isTitleLengthValid(result.title, result.subtitle)) {
+      const retry = await generateTitlesOnly(
+        image,
+        categoryForTitle,
+        attributesForTitle,
+        currentHotKeywords,
+        llmConfig,
+        [23, 25]
+      );
+      result = {
+        title: normalizeTitleText(retry.title),
+        subtitle: normalizeTitleText(retry.subtitle)
+      };
+    }
+    if (!isTitleLengthValid(result.title, result.subtitle)) {
+      throw new Error('标题长度未达标，请重试或切换标题模型');
+    }
     setGeneratedTitle(result.title);
     setGeneratedSubtitle(result.subtitle);
   };
@@ -645,7 +684,7 @@ function AppContent() {
   };
 
   const handleRunSelectedTasks = async () => {
-    if (!image || !selectedCategory || isExtracting) return;
+    if (!image || isExtracting) return;
     const tasksToRun = FEATURE_ORDER.filter(feature => selectedTasks[feature]);
     if (tasksToRun.length === 0) {
       setError('请至少勾选一个功能');
@@ -699,7 +738,8 @@ function AppContent() {
   };
 
   const handleFeatureAction = async (feature: FeatureKey) => {
-    if (!image || !selectedCategory || isExtracting) return;
+    if (!image || isExtracting) return;
+    if (feature !== 'titleOnly' && !selectedCategory) return;
     setWarnings([]);
     setIsExtracting(true);
     setExtractionStage('extracting');

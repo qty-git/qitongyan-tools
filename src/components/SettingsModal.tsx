@@ -39,7 +39,8 @@ const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1';
 
 const PROMPT_WINDOWS: Array<{ key: PromptType; title: string }> = [
   { key: 'attributesOnly', title: '属性识别 Prompt' },
-  { key: 'titleOnly', title: '标题生成 Prompt' },
+  { key: 'visualTitleMode', title: '标题生成 Prompt：视觉模式' },
+  { key: 'attributeEnhancedTitleMode', title: '标题生成 Prompt：属性增强模式' },
   { key: 'naming', title: '商品起名 Prompt' }
 ];
 
