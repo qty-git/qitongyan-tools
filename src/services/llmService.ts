@@ -8,6 +8,7 @@ export interface LLMConfig {
   model: string;
   openrouterKey?: string;
   openrouterModel?: string;
+  supportsVision?: boolean;
   onWarning?: (msg: string) => void;
   onModelChange?: (modelName: string) => void;
   customPrompts?: Partial<Record<PromptType, string>>;
@@ -67,6 +68,7 @@ const parseApiError = (error: unknown): string => {
 async function callOpenRouter(imageBase64: string | null, prompt: string, config: LLMConfig): Promise<ExtractionResult> {
   const model = config.openrouterModel || config.model || DEFAULT_MODEL;
   config.onModelChange?.(`OpenRouter ${model}`);
+  const shouldSendImage = Boolean(imageBase64 && config.supportsVision !== false);
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json'
@@ -81,7 +83,7 @@ async function callOpenRouter(imageBase64: string | null, prompt: string, config
     headers,
     body: JSON.stringify({
       action: 'vision',
-      imageBase64,
+      imageBase64: shouldSendImage ? imageBase64 : null,
       prompt,
       model
     })

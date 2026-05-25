@@ -13,6 +13,9 @@ const json = (statusCode, body) => ({
 
 const extractJson = (text = "{}") => {
   const trimmed = text.trim();
+  if (!trimmed) {
+    throw new Error("模型未返回有效 JSON");
+  }
   const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
   return JSON.parse(fenced ? fenced[1].trim() : trimmed);
 };

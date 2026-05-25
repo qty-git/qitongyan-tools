@@ -3,14 +3,23 @@ import { AlertCircle, CheckCircle2, Eye, EyeOff, Loader2, Play, RotateCcw, Save,
 import { cn } from '../lib/utils';
 import { DEFAULT_PROMPTS, PromptType } from '../services/prompts';
 import { testModelConnection } from '../services/llmService';
+import {
+  DEFAULT_FEATURE_MODELS,
+  FEATURE_LABELS,
+  FEATURE_ORDER,
+  FeatureKey,
+  formatModelOption,
+  getEnabledModelGroupsForFeature,
+  getModelById
+} from '../data/openrouterModels';
 
 interface SettingsModalProps {
   showSettings: boolean;
   setShowSettings: (show: boolean) => void;
   openrouterKey: string;
   setOpenrouterKey: (key: string) => void;
-  openrouterModel: string;
-  setOpenrouterModel: (model: string) => void;
+  featureModels: Record<FeatureKey, string>;
+  setFeatureModels: React.Dispatch<React.SetStateAction<Record<FeatureKey, string>>>;
   showOpenrouterKey: boolean;
   setShowOpenrouterKey: (show: boolean) => void;
   customPrompts: Partial<Record<PromptType, string>>;
@@ -18,33 +27,6 @@ interface SettingsModalProps {
 }
 
 const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1';
-
-const MODEL_OPTIONS = [
-  {
-    label: 'GPT-4.1 Mini',
-    value: 'openai/gpt-4.1-mini',
-    price: '低',
-    usage: '日常综合 默认推荐'
-  },
-  {
-    label: 'Claude 3.7 Sonnet',
-    value: 'anthropic/claude-3.7-sonnet',
-    price: '中高',
-    usage: '标题文案 长文本'
-  },
-  {
-    label: 'Gemini 2.5 Pro',
-    value: 'google/gemini-2.5-pro',
-    price: '中',
-    usage: '视觉理解 推理'
-  },
-  {
-    label: 'DeepSeek Chat',
-    value: 'deepseek/deepseek-chat',
-    price: '很低',
-    usage: '中文低成本'
-  }
-];
 
 const PROMPT_WINDOWS: Array<{ key: PromptType; title: string }> = [
   { key: 'attributesOnly', title: '属性识别 Prompt' },
@@ -57,8 +39,8 @@ export function SettingsModal({
   setShowSettings,
   openrouterKey,
   setOpenrouterKey,
-  openrouterModel,
-  setOpenrouterModel,
+  featureModels,
+  setFeatureModels,
   showOpenrouterKey,
   setShowOpenrouterKey,
   customPrompts,
@@ -75,13 +57,16 @@ export function SettingsModal({
     setTestStatus('loading');
     setTestError('');
     try {
-      await testModelConnection({
-        provider: 'openai',
-        apiKey: '',
-        model: openrouterModel,
-        openrouterKey,
-        openrouterModel
-      });
+      for (const feature of FEATURE_ORDER) {
+        const modelId = featureModels[feature];
+        await testModelConnection({
+          provider: 'openai',
+          apiKey: '',
+          model: modelId,
+          openrouterKey,
+          openrouterModel: modelId
+        });
+      }
       setTestStatus('success');
     } catch (error: any) {
       setTestStatus('error');
@@ -103,6 +88,17 @@ export function SettingsModal({
 
   const restoreDefaultPrompts = () => {
     setCustomPrompts({ ...DEFAULT_PROMPTS });
+  };
+
+  const useRecommendedModels = () => {
+    setFeatureModels({ ...DEFAULT_FEATURE_MODELS });
+  };
+
+  const setFeatureModel = (feature: FeatureKey, modelId: string) => {
+    setFeatureModels(prev => ({
+      ...prev,
+      [feature]: modelId
+    }));
   };
 
   return (
@@ -155,7 +151,7 @@ export function SettingsModal({
               <div className="p-4 rounded-xl bg-amber-50 border border-amber-100 flex gap-3 text-amber-800">
                 <AlertCircle size={18} className="shrink-0 mt-0.5" />
                 <p className="text-sm font-medium">
-                  前端保存 API Key 仅适合个人使用，请不要在公共网站暴露自己的 Key。
+                  前端保存 API Key 仅适合个人使用，请不要在公共网站暴露自己的 Key。OpenRouter 可降低直连官方 API 的网络和地区问题，但具体模型仍受供应商、账户和地区限制，以测试结果为准。
                 </p>
               </div>
 
@@ -179,40 +175,60 @@ export function SettingsModal({
                 </div>
               </div>
 
-              <div className="space-y-2">
-                <label className="text-xs font-black text-gray-400 uppercase tracking-wider">模型</label>
-                <select
-                  value={openrouterModel}
-                  onChange={(e) => setOpenrouterModel(e.target.value)}
-                  className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-sm font-bold"
-                >
-                  {MODEL_OPTIONS.map(model => (
-                    <option key={model.value} value={model.value}>
-                      {model.label} | {model.price} | {model.usage}
-                    </option>
-                  ))}
-                </select>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2">
-                  {MODEL_OPTIONS.map(model => (
-                    <button
-                      key={model.value}
-                      type="button"
-                      onClick={() => setOpenrouterModel(model.value)}
-                      className={cn(
-                        "text-left p-3 rounded-xl border transition-all",
-                        openrouterModel === model.value
-                          ? "bg-blue-50 border-blue-200 ring-1 ring-blue-100"
-                          : "bg-gray-50 border-gray-100 hover:bg-gray-100"
-                      )}
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-sm font-black text-gray-900">{model.label}</span>
-                        <span className="text-[10px] font-black text-blue-600 bg-blue-100 px-2 py-0.5 rounded-full">{model.price}</span>
+              <div className="space-y-3">
+                <div className="flex items-center justify-between gap-3">
+                  <label className="text-xs font-black text-gray-400 uppercase tracking-wider">独立模型选择</label>
+                  <button
+                    type="button"
+                    onClick={useRecommendedModels}
+                    className="px-3 py-1.5 rounded-lg bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors text-xs font-black"
+                  >
+                    一键使用推荐模型
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 gap-3">
+                  {FEATURE_ORDER.map(feature => {
+                    const selectedModel = getModelById(featureModels[feature]);
+                    return (
+                      <div key={feature} className="p-4 rounded-xl border border-gray-100 bg-gray-50 space-y-2">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <label className="text-sm font-black text-gray-900">{FEATURE_LABELS[feature]}模型</label>
+                            <p className="text-[11px] text-gray-500 mt-1">
+                              {feature === 'attributesOnly' ? '仅显示支持图片的模型' : '可选择视觉模型或文本模型'}
+                            </p>
+                          </div>
+                          {selectedModel && (
+                            <span className={cn(
+                              "shrink-0 px-2 py-1 rounded-full text-[10px] font-black",
+                              selectedModel.supportsVision ? "bg-green-100 text-green-700" : "bg-gray-200 text-gray-600"
+                            )}>
+                              {selectedModel.supportsVision ? '支持图片' : '文本'}
+                            </span>
+                          )}
+                        </div>
+                        <select
+                          value={featureModels[feature]}
+                          onChange={(e) => setFeatureModel(feature, e.target.value)}
+                          className="w-full p-3 bg-white border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-sm font-bold"
+                        >
+                          {getEnabledModelGroupsForFeature(feature).map(group => (
+                            <optgroup key={`${feature}-${group.provider}`} label={group.label}>
+                              {group.models.map(model => (
+                                <option key={`${feature}-${model.modelId}`} value={model.modelId}>
+                                  {formatModelOption(model)}
+                                </option>
+                              ))}
+                            </optgroup>
+                          ))}
+                        </select>
+                        {selectedModel && (
+                          <p className="text-[11px] text-gray-400 font-mono truncate">{selectedModel.modelId}</p>
+                        )}
                       </div>
-                      <p className="text-xs text-gray-500 mt-1">{model.usage}</p>
-                      <p className="text-[11px] text-gray-400 mt-1 font-mono truncate">{model.value}</p>
-                    </button>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
 
@@ -243,7 +259,7 @@ export function SettingsModal({
                   )}
                 >
                   {testStatus === 'loading' ? <Loader2 size={16} className="animate-spin" /> : testStatus === 'success' ? <CheckCircle2 size={16} /> : <Play size={16} />}
-                  {testStatus === 'loading' ? '测试中...' : testStatus === 'success' ? '连接成功' : '测试连接'}
+                  {testStatus === 'loading' ? '测试中...' : testStatus === 'success' ? '三项模型连接成功' : '测试三项模型'}
                 </button>
                 <button
                   onClick={handleSave}

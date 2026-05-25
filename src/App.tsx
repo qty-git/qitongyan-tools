@@ -11,6 +11,13 @@ import {
 import { cn } from './lib/utils';
 import { extractAttributesOnly, generateTitlesOnly, generateProductNamesOnly, AttributeDefinition, LLMConfig } from './services/llmService';
 import { DEFAULT_PROMPTS } from './services/prompts';
+import {
+  DEFAULT_FEATURE_MODELS,
+  FEATURE_LABELS,
+  FEATURE_ORDER,
+  FeatureKey,
+  getModelById
+} from './data/openrouterModels';
 
 import { SettingsModal } from './components/SettingsModal';
 import { HistoryPanel } from './components/HistoryPanel';
@@ -32,6 +39,20 @@ const safeJSONParse = (val: string | null, fallback: any) => {
     console.error("Failed to parse JSON from localStorage", e);
     return fallback;
   }
+};
+
+const normalizeFeatureModels = (stored: Partial<Record<FeatureKey, string>> = {}): Record<FeatureKey, string> => {
+  const merged = { ...DEFAULT_FEATURE_MODELS, ...stored };
+  const normalized = { ...merged };
+
+  for (const feature of FEATURE_ORDER) {
+    const modelInfo = getModelById(normalized[feature]);
+    if (!modelInfo || (feature === 'attributesOnly' && !modelInfo.supportsVision)) {
+      normalized[feature] = DEFAULT_FEATURE_MODELS[feature];
+    }
+  }
+
+  return normalized;
 };
 
 const compressImage = (base64Str: string, maxWidth = 1200, maxHeight = 1600): Promise<string> => {
@@ -140,7 +161,21 @@ function AppContent() {
   
   // OpenRouter configuration
   const [openrouterKey, setOpenrouterKey] = useState(() => localStorage.getItem('openrouter_key') || localStorage.getItem('openai_key') || '');
-  const [openrouterModel, setOpenrouterModel] = useState(() => localStorage.getItem('openrouter_model') || localStorage.getItem('openai_model') || 'openai/gpt-4.1-mini');
+  const [featureModels, setFeatureModels] = useState<Record<FeatureKey, string>>(() => normalizeFeatureModels(
+    safeJSONParse(localStorage.getItem('fashion_feature_models'), {})
+  ));
+  const [selectedTasks, setSelectedTasks] = useState<Record<FeatureKey, boolean>>(() => ({
+    attributesOnly: true,
+    titleOnly: false,
+    naming: false,
+    ...safeJSONParse(localStorage.getItem('fashion_selected_tasks'), {})
+  }));
+  const [taskStatus, setTaskStatus] = useState<Record<FeatureKey, 'idle' | 'running' | 'success' | 'error'>>({
+    attributesOnly: 'idle',
+    titleOnly: 'idle',
+    naming: 'idle'
+  });
+  const [taskErrors, setTaskErrors] = useState<Partial<Record<FeatureKey, string>>>({});
   const [minTitleLen, setMinTitleLen] = useState<number>(() => Number(localStorage.getItem('fashion_min_title_len')) || 28);
   const [maxTitleLen, setMaxTitleLen] = useState<number>(() => Number(localStorage.getItem('fashion_max_title_len')) || 30);
   const [showSettings, setShowSettings] = useState(false);
@@ -185,8 +220,17 @@ function AppContent() {
     localStorage.setItem('openrouter_key', openrouterKey);
   }, [openrouterKey]);
   useEffect(() => {
-    localStorage.setItem('openrouter_model', openrouterModel);
-  }, [openrouterModel]);
+    safeLocalStorageSet('fashion_feature_models', JSON.stringify(featureModels));
+  }, [featureModels]);
+  useEffect(() => {
+    safeLocalStorageSet('fashion_selected_tasks', JSON.stringify(selectedTasks));
+  }, [selectedTasks]);
+  useEffect(() => {
+    const normalized = normalizeFeatureModels(featureModels);
+    if (FEATURE_ORDER.some(feature => normalized[feature] !== featureModels[feature])) {
+      setFeatureModels(normalized);
+    }
+  }, [featureModels]);
 
   useEffect(() => {
     localStorage.setItem('fashion_generated_product_name', generatedProductName);
@@ -403,134 +447,213 @@ function AppContent() {
     reader.readAsDataURL(file);
   };
 
-  const getLLMConfig = (): LLMConfig | null => {
+  const getLLMConfig = (feature: FeatureKey): LLMConfig | null => {
     if (!openrouterKey) {
       setError("请在系统设置中填写 OpenRouter API Key");
       setShowSettings(true);
       return null;
     }
 
+    const modelId = featureModels[feature] || DEFAULT_FEATURE_MODELS[feature];
+    const modelInfo = getModelById(modelId);
     return {
       provider: 'openai',
       apiKey: '',
-      model: openrouterModel,
+      model: modelId,
       openrouterKey,
-      openrouterModel,
+      openrouterModel: modelId,
+      supportsVision: modelInfo?.supportsVision,
       onWarning: (msg) => setWarnings(prev => prev.includes(msg) ? prev : [...prev, msg]),
       onModelChange: (model) => setCurrentAttemptingModel(model),
       customPrompts
     };
   };
 
-  const handleExtractAttributes = async () => {
-    if (!image || !selectedCategory) return;
-    const llmConfig = getLLMConfig();
-    if (!llmConfig) return;
+  const buildFinalAttributes = (attributes: Record<string, string>) => {
+    const currentRequired = requiredAttributes[selectedCategory] || [];
+    const finalAttributes: Record<string, string> = {};
+    currentRequired.forEach(attr => {
+      if (attributes[attr]) finalAttributes[attr] = attributes[attr];
+    });
 
-    setWarnings([]);
-    setIsExtracting(true);
-    setExtractionStage('extracting');
-    setError(null);
-    setCurrentAttemptingModel('');
-
-    try {
-      const currentRequired = requiredAttributes[selectedCategory] || [];
-      const attributes = await extractAttributesOnly(
-        image,
-        selectedCategory,
-        currentAttributes,
-        currentRequired,
-        llmConfig
-      );
-
-      let finalAttributes: Record<string, string> = {};
-      currentRequired.forEach(attr => {
-        if (attributes[attr]) finalAttributes[attr] = attributes[attr];
-      });
-
-      const itemNoAttr = currentAttributes.find(a => a.attribute === '货号' || a.attribute === '商品货号' || a.attribute === '款号');
-      if (itemNoAttr && imageName) {
-        finalAttributes[itemNoAttr.attribute] = imageName;
-      }
-
-      setExtractedData(finalAttributes);
-      setExtractionStage('success');
-      setTimeout(() => setExtractionStage('idle'), 2000);
-    } catch (err: any) {
-      handleLLMError(err);
-    } finally {
-      setIsExtracting(false);
+    const itemNoAttr = currentAttributes.find(a => a.attribute === '货号' || a.attribute === '商品货号' || a.attribute === '款号');
+    if (itemNoAttr && imageName) {
+      finalAttributes[itemNoAttr.attribute] = imageName;
     }
+
+    return finalAttributes;
   };
 
-  const handleGenerateTitles = async () => {
-    if (!image || !selectedCategory) return;
-    const llmConfig = getLLMConfig();
-    if (!llmConfig) return;
-
-    setWarnings([]);
-    setIsExtracting(true);
-    setExtractionStage('extracting');
-    setError(null);
-    setCurrentAttemptingModel('');
-
-    try {
-      const currentHotKeywords = categoryKeywords[selectedCategory] || '';
-      const result = await generateTitlesOnly(
-        image,
-        selectedCategory,
-        extractedData,
-        currentHotKeywords,
-        llmConfig,
-        [minTitleLen, maxTitleLen]
-      );
-
-      setGeneratedTitle(result.title);
-      setGeneratedSubtitle(result.subtitle);
-      setExtractionStage('success');
-      setTimeout(() => setExtractionStage('idle'), 2000);
-    } catch (err: any) {
-      handleLLMError(err);
-    } finally {
-      setIsExtracting(false);
+  const runAttributesTask = async () => {
+    if (!image || !selectedCategory) throw new Error('请先上传图片并选择类目');
+    const modelInfo = getModelById(featureModels.attributesOnly);
+    if (!modelInfo?.supportsVision) {
+      throw new Error('属性识别模型必须支持图片，请更换支持图片的模型');
     }
+    const llmConfig = getLLMConfig('attributesOnly');
+    if (!llmConfig) throw new Error('请先填写 OpenRouter API Key');
+
+    const currentRequired = requiredAttributes[selectedCategory] || [];
+    const attributes = await extractAttributesOnly(
+      image,
+      selectedCategory,
+      currentAttributes,
+      currentRequired,
+      llmConfig
+    );
+    const finalAttributes = buildFinalAttributes(attributes);
+    setExtractedData(finalAttributes);
+    return finalAttributes;
   };
 
-  const handleGenerateNames = async () => {
-    if (!image || !selectedCategory) return;
-    const llmConfig = getLLMConfig();
-    if (!llmConfig) return;
-
-    setWarnings([]);
-    setIsExtracting(true);
-    setExtractionStage('extracting');
-    setError(null);
-    setCurrentAttemptingModel('');
-
-    try {
-      const names = await generateProductNamesOnly(image, selectedCategory, llmConfig, namingFeedback);
-      setGeneratedProductNames(names);
-      if (names.length > 0) setGeneratedProductName(names[0]);
-      setExtractionStage('success');
-      setTimeout(() => setExtractionStage('idle'), 2000);
-    } catch (err: any) {
-      handleLLMError(err);
-    } finally {
-      setIsExtracting(false);
+  const runTitlesTask = async (attributesForTitle: Record<string, string>) => {
+    if (!image || !selectedCategory) throw new Error('请先上传图片并选择类目');
+    if (Object.keys(attributesForTitle).length === 0) {
+      throw new Error('标题生成需要先有 attributes：请勾选属性识别，或先完成属性识别。');
     }
+    const llmConfig = getLLMConfig('titleOnly');
+    if (!llmConfig) throw new Error('请先填写 OpenRouter API Key');
+
+    const currentHotKeywords = categoryKeywords[selectedCategory] || '';
+    const result = await generateTitlesOnly(
+      image,
+      selectedCategory,
+      attributesForTitle,
+      currentHotKeywords,
+      llmConfig,
+      [minTitleLen, maxTitleLen]
+    );
+    setGeneratedTitle(result.title);
+    setGeneratedSubtitle(result.subtitle);
   };
 
-  const handleLLMError = (err: any) => {
+  const runNamesTask = async () => {
+    if (!image || !selectedCategory) throw new Error('请先上传图片并选择类目');
+    const llmConfig = getLLMConfig('naming');
+    if (!llmConfig) throw new Error('请先填写 OpenRouter API Key');
+
+    let names = await generateProductNamesOnly(image, selectedCategory, llmConfig, namingFeedback);
+    if (names.length === 0) {
+      names = await generateProductNamesOnly(image, selectedCategory, llmConfig, namingFeedback);
+    }
+    if (names.length === 0) throw new Error('商品起名没有返回候选名称，请重试或切换模型');
+    setGeneratedProductNames(names);
+    if (names.length > 0) setGeneratedProductName(names[0]);
+  };
+
+  const getLLMErrorMessage = (err: any) => {
     const errorMessage = err?.message || "";
     const errorStatus = err?.status || err?.error?.status || err?.code || err?.error?.code;
-    
+
     if (errorMessage.includes('429') || errorMessage.includes('RESOURCE_EXHAUSTED') || errorStatus === 429 || errorStatus === 'RESOURCE_EXHAUSTED') {
-      setError("AI 接口调用次数超限 (Rate Limit Exceeded)。请稍等几秒钟后再试，或者检查您的 API 配额。");
-    } else if (errorMessage.includes('API Key') || errorMessage.includes('OpenRouter API Key')) {
-      setError(errorMessage);
+      return "AI 接口调用次数超限 (Rate Limit Exceeded)。请稍等几秒钟后再试，或者检查您的 API 配额。";
+    }
+    if (errorMessage.includes('API Key') || errorMessage.includes('OpenRouter API Key')) {
+      return errorMessage;
+    }
+    return errorMessage || "AI 调用失败。请检查网络连接或重试。";
+  };
+
+  const runSingleTask = async (feature: FeatureKey) => {
+    let attributesForTitle = extractedData;
+    if (feature === 'attributesOnly') {
+      await runAttributesTask();
+    } else if (feature === 'titleOnly') {
+      await runTitlesTask(attributesForTitle);
+    } else {
+      await runNamesTask();
+    }
+  };
+
+  const handleRunSelectedTasks = async () => {
+    if (!image || !selectedCategory || isExtracting) return;
+    const tasksToRun = FEATURE_ORDER.filter(feature => selectedTasks[feature]);
+    if (tasksToRun.length === 0) {
+      setError('请至少勾选一个功能');
+      return;
+    }
+
+    setWarnings([]);
+    setIsExtracting(true);
+    setExtractionStage('extracting');
+    setError(null);
+    setCurrentAttemptingModel('');
+    setTaskErrors({});
+    setTaskStatus({ attributesOnly: 'idle', titleOnly: 'idle', naming: 'idle' });
+
+    let attributesForTitle = extractedData;
+    const failures: Partial<Record<FeatureKey, string>> = {};
+    try {
+      for (const feature of FEATURE_ORDER) {
+        if (!selectedTasks[feature]) continue;
+        setTaskStatus(prev => ({ ...prev, [feature]: 'running' }));
+        try {
+          if (feature === 'attributesOnly') {
+            attributesForTitle = await runAttributesTask();
+          } else if (feature === 'titleOnly') {
+            await runTitlesTask(attributesForTitle);
+          } else {
+            await runNamesTask();
+          }
+          setTaskStatus(prev => ({ ...prev, [feature]: 'success' }));
+        } catch (err: any) {
+          const message = getLLMErrorMessage(err);
+          failures[feature] = message;
+          setTaskErrors(prev => ({ ...prev, [feature]: message }));
+          setTaskStatus(prev => ({ ...prev, [feature]: 'error' }));
+          console.error(`${FEATURE_LABELS[feature]} failed:`, err);
+        }
+      }
+
+      if (Object.keys(failures).length > 0) {
+        setError(
+          Object.entries(failures)
+            .map(([feature, message]) => `${FEATURE_LABELS[feature as FeatureKey]}失败：${message}`)
+            .join('；')
+        );
+      }
+      setExtractionStage('success');
+      setTimeout(() => setExtractionStage('idle'), 2000);
+    } finally {
+      setIsExtracting(false);
+    }
+  };
+
+  const handleFeatureAction = async (feature: FeatureKey) => {
+    if (!image || !selectedCategory || isExtracting) return;
+    setWarnings([]);
+    setIsExtracting(true);
+    setExtractionStage('extracting');
+    setError(null);
+    setCurrentAttemptingModel('');
+    setTaskErrors({});
+    setTaskStatus(prev => ({ ...prev, [feature]: 'running' }));
+
+    try {
+      await runSingleTask(feature);
+      setTaskStatus(prev => ({ ...prev, [feature]: 'success' }));
+      setExtractionStage('success');
+      setTimeout(() => setExtractionStage('idle'), 2000);
+    } catch (err: any) {
+      setTaskStatus(prev => ({ ...prev, [feature]: 'error' }));
+      setTaskErrors(prev => ({ ...prev, [feature]: getLLMErrorMessage(err) }));
+      handleLLMError(err);
+    } finally {
+      setIsExtracting(false);
+    }
+  };
+
+  const handleExtractAttributes = () => handleFeatureAction('attributesOnly');
+  const handleGenerateTitles = () => handleFeatureAction('titleOnly');
+  const handleGenerateNames = () => handleFeatureAction('naming');
+
+  const handleLLMError = (err: any) => {
+    const message = getLLMErrorMessage(err);
+    if (message.includes('API Key') || message.includes('OpenRouter API Key')) {
+      setError(message);
       setShowSettings(true);
     } else {
-      setError(errorMessage || "AI 调用失败。请检查网络连接或重试。");
+      setError(message);
     }
     setExtractionStage('idle');
     console.error("LLM error:", err);
@@ -577,7 +700,7 @@ function AppContent() {
     
     setCurrentAttemptingModel('');
     try {
-      const llmConfig = getLLMConfig();
+      const llmConfig = getLLMConfig('naming');
       if (!llmConfig) return;
       const names = await generateProductNamesOnly(image, selectedCategory, llmConfig, namingFeedback);
       setGeneratedProductNames(names);
@@ -752,6 +875,9 @@ function AppContent() {
   };
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const modelSummary = FEATURE_ORDER
+    .map(feature => `${FEATURE_LABELS[feature]} ${getModelById(featureModels[feature])?.displayName || featureModels[feature]}`)
+    .join(' / ');
 
   return (
     <div className="flex min-h-screen bg-gray-50 font-sans text-gray-900">
@@ -776,8 +902,8 @@ function AppContent() {
                   <span className="text-[9px] font-bold text-gray-400 uppercase tracking-widest leading-none mb-1">当前 AI 模型</span>
                   <div className="flex items-center gap-1.5">
                     <div className={cn("w-1.5 h-1.5 rounded-full", isExtracting ? "bg-green-500 animate-pulse" : "bg-blue-500")} />
-                    <span className="text-xs font-black text-gray-700">
-                      {currentAttemptingModel || `OpenRouter ${openrouterModel}`}
+                    <span className="text-xs font-black text-gray-700 max-w-[360px] truncate">
+                      {currentAttemptingModel || modelSummary}
                     </span>
                   </div>
                 </div>
@@ -847,11 +973,18 @@ function AppContent() {
                 categories={categories}
                 isExtracting={isExtracting}
                 image={image}
+                selectedTasks={selectedTasks}
+                setSelectedTasks={setSelectedTasks}
+                featureModels={featureModels}
+                setFeatureModels={setFeatureModels}
                 handleExtractAttributes={handleExtractAttributes}
                 handleGenerateTitles={handleGenerateTitles}
                 handleGenerateNames={handleGenerateNames}
+                handleRunSelectedTasks={handleRunSelectedTasks}
                 extractionStage={extractionStage}
                 currentAttemptingModel={currentAttemptingModel}
+                taskStatus={taskStatus}
+                taskErrors={taskErrors}
               />
             </div>
 
@@ -917,8 +1050,8 @@ function AppContent() {
         setShowSettings={setShowSettings}
         openrouterKey={openrouterKey}
         setOpenrouterKey={setOpenrouterKey}
-        openrouterModel={openrouterModel}
-        setOpenrouterModel={setOpenrouterModel}
+        featureModels={featureModels}
+        setFeatureModels={setFeatureModels}
         showOpenrouterKey={showOpenrouterKey}
         setShowOpenrouterKey={setShowOpenrouterKey}
         customPrompts={customPrompts}

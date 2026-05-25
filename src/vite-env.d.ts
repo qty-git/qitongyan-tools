@@ -1,12 +1,7 @@
 /// <reference types="vite/client" />
 
 interface ImportMetaEnv {
-  readonly VITE_GEMINI_API_KEY: string
-  readonly VITE_QWEN_API_KEY: string
-  readonly VITE_DOUBAO_API_KEY: string
-  readonly VITE_DOUBAO_VISION_MODEL: string
-  readonly VITE_DOUBAO_TEXT_MODEL: string
-  readonly VITE_DOUBAO_ENDPOINT: string
+  readonly VITE_OPENROUTER_API_KEY?: string
 }
 
 interface ImportMeta {
