@@ -2,7 +2,12 @@ import React, { useState } from 'react';
 import { AlertCircle, CheckCircle2, Eye, EyeOff, Loader2, Play, RotateCcw, Save, Settings, X } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { DEFAULT_PROMPTS, PromptType } from '../services/prompts';
-import { testModelConnection } from '../services/llmService';
+import {
+  ConnectionTestResult,
+  OpenRouterDebugDetail,
+  testModelConnection,
+  testOpenRouterBaseConnection
+} from '../services/llmService';
 import {
   FEATURE_LABELS,
   FEATURE_ORDER,
@@ -44,6 +49,13 @@ const PROMPT_WINDOWS: Array<{ key: PromptType; title: string }> = [
   { key: 'naming', title: '商品起名 Prompt' }
 ];
 
+type ConnectionDetailRow = {
+  label: string;
+  status: 'success' | 'warning' | 'error';
+  message: string;
+  detail?: OpenRouterDebugDetail;
+};
+
 export function SettingsModal({
   showSettings,
   setShowSettings,
@@ -67,29 +79,68 @@ export function SettingsModal({
 }: SettingsModalProps) {
   const [activeTab, setActiveTab] = useState<'api' | 'prompts'>('api');
   const [testStatus, setTestStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+  const [baseTestStatus, setBaseTestStatus] = useState<'idle' | 'loading' | 'success' | 'warning' | 'error'>('idle');
   const [testError, setTestError] = useState('');
+  const [connectionDetails, setConnectionDetails] = useState<ConnectionDetailRow[]>([]);
   const [saved, setSaved] = useState(false);
 
   if (!showSettings) return null;
 
+  const resultToRow = (label: string, result: ConnectionTestResult): ConnectionDetailRow => ({
+    label,
+    status: result.warning ? 'warning' : result.ok ? 'success' : 'error',
+    message: result.warning || (result.ok ? '连接成功' : result.error || '连接失败'),
+    detail: result.debug
+  });
+
+  const errorToRow = (label: string, error: any): ConnectionDetailRow => ({
+    label,
+    status: 'error',
+    message: error?.message || '连接失败',
+    detail: error?.debug
+  });
+
+  const handleBaseTest = async () => {
+    setBaseTestStatus('loading');
+    setTestError('');
+    setConnectionDetails([]);
+    try {
+      const result = await testOpenRouterBaseConnection(openrouterKey);
+      setConnectionDetails([resultToRow('OpenRouter 基础连接', result)]);
+      setBaseTestStatus(result.warning ? 'warning' : 'success');
+    } catch (error: any) {
+      setConnectionDetails([errorToRow('OpenRouter 基础连接', error)]);
+      setBaseTestStatus('error');
+      setTestError(error?.message || '基础连接失败');
+    }
+  };
+
   const handleTest = async () => {
     setTestStatus('loading');
     setTestError('');
-    try {
-      for (const feature of FEATURE_ORDER) {
+    const rows: ConnectionDetailRow[] = [];
+    for (const feature of FEATURE_ORDER) {
+      try {
         const modelId = featureModels[feature];
-        await testModelConnection({
+        const result = await testModelConnection({
           provider: 'openai',
           apiKey: '',
           model: modelId,
           openrouterKey,
           openrouterModel: modelId
         });
+        rows.push(resultToRow(FEATURE_LABELS[feature], result));
+      } catch (error: any) {
+        rows.push(errorToRow(FEATURE_LABELS[feature], error));
       }
-      setTestStatus('success');
-    } catch (error: any) {
+    }
+
+    setConnectionDetails(rows);
+    if (rows.some(row => row.status === 'error')) {
       setTestStatus('error');
-      setTestError(error?.message || '连接失败');
+      setTestError('部分模型测试失败，请查看连接测试详情。');
+    } else {
+      setTestStatus('success');
     }
   };
 
@@ -322,7 +373,68 @@ export function SettingsModal({
                 </div>
               )}
 
+              {connectionDetails.length > 0 && (
+                <div className="space-y-3">
+                  <div>
+                    <label className="text-xs font-black text-gray-400 uppercase tracking-wider">连接测试详情</label>
+                    <p className="text-[11px] text-gray-500 mt-1">
+                      这里区分 OpenRouter 是否可达、模型是否响应，以及具体状态码。
+                    </p>
+                  </div>
+                  <div className="space-y-2">
+                    {connectionDetails.map((row, index) => (
+                      <div
+                        key={`${row.label}-${index}`}
+                        className={cn(
+                          "p-4 rounded-xl border text-sm",
+                          row.status === 'success' && "bg-green-50 border-green-100 text-green-800",
+                          row.status === 'warning' && "bg-amber-50 border-amber-100 text-amber-800",
+                          row.status === 'error' && "bg-red-50 border-red-100 text-red-800"
+                        )}
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <p className="font-black">{row.label}</p>
+                          <span className="text-[10px] font-black uppercase">
+                            {row.status === 'success' ? '成功' : row.status === 'warning' ? 'OpenRouter 可达' : '失败'}
+                          </span>
+                        </div>
+                        <p className="mt-1 font-medium">{row.message}</p>
+                        {row.detail && (
+                          <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 text-[11px] font-mono text-gray-600">
+                            <span>URL: {row.detail.targetUrl}</span>
+                            <span>模型: {row.detail.model}</span>
+                            <span>Provider: {row.detail.provider}</span>
+                            <span>Status: {row.detail.statusCode ?? '无'}</span>
+                            <span>OpenRouter: {row.detail.openrouterReachable ? '已连接' : '未连接'}</span>
+                            <span>模型响应: {row.detail.modelResponded ? '已返回' : '未返回'}</span>
+                            <span>类型: {row.detail.errorType || '无'}</span>
+                            <span className="sm:col-span-2 break-words">消息: {row.detail.responseMessage || '无'}</span>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               <div className="flex flex-col sm:flex-row gap-3">
+                <button
+                  onClick={handleBaseTest}
+                  disabled={!openrouterKey || baseTestStatus === 'loading'}
+                  className={cn(
+                    "flex-1 py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all",
+                    !openrouterKey || baseTestStatus === 'loading'
+                      ? "bg-gray-100 text-gray-400 cursor-not-allowed"
+                      : baseTestStatus === 'success'
+                        ? "bg-green-600 text-white"
+                        : baseTestStatus === 'warning'
+                          ? "bg-amber-600 text-white"
+                          : "bg-blue-600 text-white hover:bg-blue-700"
+                  )}
+                >
+                  {baseTestStatus === 'loading' ? <Loader2 size={16} className="animate-spin" /> : baseTestStatus === 'success' ? <CheckCircle2 size={16} /> : <Play size={16} />}
+                  {baseTestStatus === 'loading' ? '测试中...' : baseTestStatus === 'success' ? 'OpenRouter 连接成功' : '测试 OpenRouter 基础连接'}
+                </button>
                 <button
                   onClick={handleTest}
                   disabled={!openrouterKey || testStatus === 'loading'}

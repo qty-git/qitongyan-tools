@@ -27,7 +27,27 @@ export interface ExtractionResult {
   productNames: string[];
 }
 
-const DEFAULT_MODEL = 'openai/gpt-4.1-mini';
+export interface OpenRouterDebugDetail {
+  targetUrl: string;
+  model: string;
+  provider: string;
+  statusCode: number | null;
+  responseMessage: string;
+  openrouterReachable: boolean;
+  modelResponded: boolean;
+  success: boolean;
+  errorType?: string;
+}
+
+export interface ConnectionTestResult {
+  ok: boolean;
+  warning?: string;
+  error?: string;
+  errorType?: string;
+  debug?: OpenRouterDebugDetail;
+}
+
+const DEFAULT_MODEL = 'openrouter/auto';
 const OPENROUTER_ENDPOINT = '/.netlify/functions/openai';
 
 function replacePlaceholders(template: string, data: Record<string, unknown>): string {
@@ -67,15 +87,62 @@ const flattenProductNames = (parsed: any): string[] => {
   ];
 };
 
-const parseApiError = (error: unknown): string => {
+export const parseOpenRouterError = (error: unknown): string => {
   const errMsg = error instanceof Error ? error.message : String(error);
   const lower = errMsg.toLowerCase();
 
-  if (lower.includes('api key') || lower.includes('401')) return 'API Key 无效';
-  if (lower.includes('model') || lower.includes('404')) return '模型不存在';
-  if (lower.includes('balance') || lower.includes('credit') || lower.includes('quota') || lower.includes('402') || lower.includes('429')) return '余额不足或调用频率过高';
-  if (lower.includes('network') || lower.includes('fetch') || lower.includes('timeout')) return '网络错误';
+  if (lower.includes('401') || lower.includes('invalid_api_key')) return 'API Key 无效';
+  if (lower.includes('403') || lower.includes('region') || lower.includes('not available in your region')) return '当前地区或模型不可用';
+  if (lower.includes('429') || lower.includes('rate limit') || lower.includes('too many requests')) return '请求频率限制';
+  if (lower.includes('provider unavailable') || lower.includes('provider returned error') || lower.includes('no provider')) return '当前模型供应商不可用';
+  if (lower.includes('model') || lower.includes('404')) return '模型不存在或已下线';
+  if (lower.includes('balance') || lower.includes('credit') || lower.includes('quota') || lower.includes('402')) return '余额不足或额度不可用';
+  if (lower.includes('cors')) return '浏览器请求被拦截';
+  if (lower.includes('network') || lower.includes('fetch') || lower.includes('timeout') || lower.includes('failed to fetch')) return '网络连接失败';
   return errMsg || 'AI 调用失败';
+};
+
+const buildFetchBlockedDetail = (model: string): OpenRouterDebugDetail => ({
+  targetUrl: OPENROUTER_ENDPOINT,
+  model,
+  provider: model.split('/')[0] || 'unknown',
+  statusCode: null,
+  responseMessage: '浏览器无法访问 Netlify 函数，可能是网络、CORS、隐私插件或浏览器策略拦截。',
+  openrouterReachable: false,
+  modelResponded: false,
+  success: false,
+  errorType: 'network_or_cors'
+});
+
+const throwApiError = (data: any, fallback: string, model: string): never => {
+  const error = new Error(data.error || fallback || 'AI 调用失败') as Error & { debug?: OpenRouterDebugDetail; errorType?: string; status?: number };
+  error.debug = data.debug || buildFetchBlockedDetail(model);
+  error.errorType = data.errorType || data.debug?.errorType;
+  error.status = data.debug?.statusCode;
+  throw error;
+};
+
+const postOpenRouterFunction = async (payload: Record<string, unknown>, openrouterKey?: string) => {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json'
+  };
+
+  if (openrouterKey) {
+    headers.Authorization = `Bearer ${openrouterKey}`;
+  }
+
+  try {
+    return await fetch(OPENROUTER_ENDPOINT, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(payload)
+    });
+  } catch (error) {
+    const err = new Error(parseOpenRouterError(error)) as Error & { debug?: OpenRouterDebugDetail; errorType?: string };
+    err.debug = buildFetchBlockedDetail(String(payload.model || DEFAULT_MODEL));
+    err.errorType = 'network_or_cors';
+    throw err;
+  }
 };
 
 async function callOpenRouter(imageBase64: string | null, prompt: string, config: LLMConfig): Promise<ExtractionResult> {
@@ -83,28 +150,16 @@ async function callOpenRouter(imageBase64: string | null, prompt: string, config
   config.onModelChange?.(`OpenRouter ${model}`);
   const shouldSendImage = Boolean(imageBase64 && config.supportsVision !== false);
 
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json'
-  };
-
-  if (config.openrouterKey) {
-    headers.Authorization = `Bearer ${config.openrouterKey}`;
-  }
-
-  const response = await fetch(OPENROUTER_ENDPOINT, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({
-      action: 'vision',
-      imageBase64: shouldSendImage ? imageBase64 : null,
-      prompt,
-      model
-    })
-  });
+  const response = await postOpenRouterFunction({
+    action: 'vision',
+    imageBase64: shouldSendImage ? imageBase64 : null,
+    prompt,
+    model
+  }, config.openrouterKey);
 
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(data.error || parseApiError(response.statusText));
+    throwApiError(data, parseOpenRouterError(response.statusText), model);
   }
 
   const parsed = data.result || {};
@@ -113,6 +168,45 @@ async function callOpenRouter(imageBase64: string | null, prompt: string, config
     title: parsed.title || '',
     subtitle: parsed.subtitle || '',
     productNames: flattenProductNames(parsed)
+  };
+}
+
+export async function testOpenRouterBaseConnection(openrouterKey: string): Promise<ConnectionTestResult> {
+  const response = await postOpenRouterFunction({
+    action: 'basic-test',
+    model: 'openrouter/auto'
+  }, openrouterKey);
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throwApiError(data, parseOpenRouterError(response.statusText), 'openrouter/auto');
+  }
+
+  return {
+    ok: Boolean(data.ok),
+    warning: data.warning,
+    errorType: data.errorType,
+    debug: data.debug
+  };
+}
+
+export async function testModelConnection(config: LLMConfig): Promise<ConnectionTestResult> {
+  const model = config.openrouterModel || config.model || DEFAULT_MODEL;
+  const response = await postOpenRouterFunction({
+    action: 'test',
+    model
+  }, config.openrouterKey);
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throwApiError(data, parseOpenRouterError(response.statusText), model);
+  }
+
+  return {
+    ok: Boolean(data.ok),
+    warning: data.warning,
+    errorType: data.errorType,
+    debug: data.debug
   };
 }
 
@@ -180,30 +274,4 @@ export async function generateProductNamesOnly(
 
   const result = await callOpenRouter(imageBase64, prompt, config);
   return result.productNames;
-}
-
-export async function testModelConnection(config: LLMConfig): Promise<boolean> {
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json'
-  };
-
-  if (config.openrouterKey) {
-    headers.Authorization = `Bearer ${config.openrouterKey}`;
-  }
-
-  const response = await fetch(OPENROUTER_ENDPOINT, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({
-      action: 'test',
-      model: config.openrouterModel || config.model || DEFAULT_MODEL
-    })
-  });
-
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(data.error || parseApiError(response.statusText));
-  }
-
-  return Boolean(data.ok);
 }
